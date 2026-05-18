@@ -11,13 +11,13 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
-// Настройка путей для облачной базы данных SQLite
+// Определение путей базы данных для облака/локалки
 const isCloud = process.env.RENDER || process.env.RAILWAY_STATIC_URL || false;
 const dbPath = isCloud ? path.join('/tmp', 'steam_one_file_core.db') : './steam_one_file_core.db';
 
 const db = new sqlite3.Database(dbPath, (err) => {
-    if (err) console.error('БД офлайн:', err.message);
-    else console.log(`[DATABASE]: Развернута по пути: ${dbPath}`);
+    if (err) console.error('Ошибка БД:', err.message);
+    else console.log(`[DATABASE]: База данных запущена по пути: ${dbPath}`);
 });
 
 db.run("PRAGMA busy_timeout = 5000;");
@@ -67,9 +67,9 @@ function launchAccountBot(username, password, sharedSecret) {
 
     client.on('loggedOn', () => {
         db.run(`UPDATE accounts SET status = 'ONLINE' WHERE username = ?`, [username]);
-        saveLog(username, "Автономный сервер Valve подтвердил сессию. Бот онлайн 24/7.");
+        saveLog(username, "Сессия подтверждена сервером. Бот онлайн 24/7.");
         client.setPersona(SteamUser.EPersonaState.Online);
-        client.gamesPlayed(); 
+        client.gamesPlayed([730, 440]); // Фикс: Передача AppID в виде массива
     });
 
     client.on('webSession', (sessionID, cookies) => {
@@ -96,7 +96,7 @@ function launchAccountBot(username, password, sharedSecret) {
 
     client.on('error', (err) => {
         db.run(`UPDATE accounts SET status = 'ERROR' WHERE username = ?`, [username]);
-        saveLog(username, `Ошибка интернет-сессии: ${err.message}`);
+        saveLog(username, `Ошибка сессии: ${err.message}`);
     });
 }
 
@@ -122,7 +122,7 @@ app.post('/api/account/add', (req, res) => {
 
     db.run(`INSERT OR REPLACE INTO accounts (username, password, shared_secret) VALUES (?, ?, ?)`, 
         [username, password, sharedSecret], () => {
-            saveLog('SYSTEM', `Аккаунт ${username} успешно добавлен через веб-интерфейс.`);
+            saveLog('SYSTEM', `Аккаунт ${username} добавлен в ветку бэкенда.`);
             launchAccountBot(username, password, sharedSecret);
             res.json({ success: true });
         }
@@ -140,7 +140,7 @@ app.post('/api/evolve', (req, res) => {
     });
 });
 
-// МОНОЛИТНЫЙ ЭНДПОИНТ: Отдает полноценный HTML/CSS/JS интерфейс прямо из памяти бэкенда
+// Отдача фронтенда. Внимание: Знак обратного слэша (\) перед знаком доллара ($) защищает строки JS от ложного PHP/Node парсинга!
 app.get('/', (req, res) => {
     res.send(`
 <!DOCTYPE html>
@@ -167,7 +167,7 @@ app.get('/', (req, res) => {
         .OFFLINE { background: rgba(239,68,68,0.15); color: var(--red); }
         .CONNECTING { background: rgba(16,120,255,0.15); color: var(--steam-blue); }
         .neon { color: var(--steam-cyan); text-shadow: 0 0 10px rgba(0,255,204,0.3); }
-        .ai-panel { background: radial-gradient(circle at top left, #0d1527, var(--bg-panel)); border-color: rgba(0,255,204,0.2); border: 1px solid rgba(0,255,204,0.2); }
+        .ai-panel { background: radial-gradient(circle at top left, #0d1527, var(--bg-panel)); border: 1px solid rgba(0,255,204,0.2); }
     </style>
 </head>
 <body>
@@ -188,11 +188,11 @@ app.get('/', (req, res) => {
     <main style="display: flex; flex-direction: column; gap: 25px;">
         <div class="panel ai-panel">
             <div class="panel-header">
-                <span>🤖 TRADING AI AGENT v7.5 [ONE-FILE MONOLITH]</span>
+                <span>🤖 TRADING AI AGENT v7.5 [FIXED ENGINE]</span>
                 <span class="neon" id="ui-gen">МУТАЦИЯ ЯДРА: 1</span>
             </div>
             <p style="font-style:italic; color:#94a3b8; line-height:1.6; background:#02050c; padding:15px; border-radius:8px; border-left:3px solid var(--steam-cyan);">
-                "Проект запущен в монолитном режиме. Папка public удалена для оптимизации линковок в облаке Render. Все функции трейдинга и саморазвития активны."
+                "Код успешно пересобран. Исправлена ошибка интерполяции фронтенд-скриптов. База данных SQLite синхронизирована с сессиями. Система готова к работе в облаке Render."
             </p>
         </div>
 
@@ -212,21 +212,15 @@ app.get('/', (req, res) => {
         try {
             const res = await fetch('/api/dashboard');
             const data = await res.json();
-            document.getElementById('ui-gen').innerText = \`МУТАЦИЯ ЯДРА: \${data.generation}\`;
-            document.getElementById('ui-tax').innerText = \`\${(data.taxRate * 100).toFixed(2)}%\`;
+            document.getElementById('ui-gen').innerText = 'МУТАЦИЯ ЯДРА: ' + data.generation;
+            document.getElementById('ui-tax').innerText = (data.taxRate * 100).toFixed(2) + '%';
             const term = document.getElementById('terminal-box');
-            term.innerHTML = data.logs.map(log => \`<div>\${log}</div>\`).join('');
+            term.innerHTML = data.logs.map(function(log) { return '<div>' + log + '</div>'; }).join('');
             term.scrollTop = term.scrollHeight;
             const container = document.getElementById('accounts-container');
-            container.innerHTML = data.accounts.map(acc => \`
-                <div class="account-card">
-                    <div>
-                        <div style="font-weight:700; color:#fff;">\${acc.username}</div>
-                        <div style="font-size:0.8rem; color:#94a3b8; margin-top:2px;">Баланс: $\${acc.balance.toFixed(2)}</div>
-                    </div>
-                    <span class="status-badge \${acc.status}">\${acc.status}</span>
-                </div>
-            \`).join('');
+            container.innerHTML = data.accounts.map(function(acc) {
+                return '<div class="account-card"><div><div style="font-weight:700; color:#fff;">' + acc.username + '</div><div style="font-size:0.8rem; color:#94a3b8; margin-top:2px;">Баланс: $' + acc.balance.toFixed(2) + '</div></div><span class="status-badge ' + acc.status + '">' + acc.status + '</span></div>';
+            }).join('');
         } catch (e) {}
     }
 
@@ -257,4 +251,4 @@ app.get('/', (req, res) => {
     `);
 });
 
-app.listen(PORT, () => console.log(`[CLOUD CORE]: Монолитный сервер развернут на порту ${PORT}`));
+app.listen(PORT, () => console.log(`[CLOUD CORE]: Обновленный монолитный сервер развернут на порту ${PORT}`));
