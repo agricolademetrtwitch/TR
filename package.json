@@ -1,7 +1,7 @@
 {
-  "name": "steam-autonomous-cloud-suite",
-  "version": "3.0.0",
-  "description": "Cloud-ready Steam multi-account trading engine",
+  "name": "steam-autonomous-one-file-suite",
+  "version": "3.5.0",
+  "description": "Cloud-ready Steam suite inside one monolithic file",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
