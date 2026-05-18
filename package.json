@@ -1,0 +1,20 @@
+{
+  "name": "steam-autonomous-cloud-suite",
+  "version": "3.0.0",
+  "description": "Cloud-ready Steam multi-account trading engine",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "steam-user": "^5.2.0",
+    "steam-totp": "^2.1.2",
+    "steamcommunity": "^3.45.0",
+    "steam-tradeoffer-manager": "^4.6.0",
+    "sqlite3": "^5.1.7"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
