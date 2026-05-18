@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Steam Multi-Account Control Panel v2.5</title>
+    <link href="https://googleapis.com" rel="stylesheet">
+    <style>
+        :root {
+            --bg-deep: #030712;
+            --bg-panel: #0b0f19;
+            --bg-card: #131926;
+            --steam-blue: #1078ff;
+            --steam-cyan: #00ffcc;
+            --green: #10b981;
+            --red: #ef4444;
+            --border: 1px solid rgba(255,255,255,0.05);
+        }
+        * { box-sizing: border-box; font-family: 'Plus Jakarta Sans', sans-serif; margin: 0; padding: 0; }
+        body { background: var(--bg-deep); color: #f3f4f6; padding: 25px; }
+        
+        .container { max-width: 1750px; margin: 0 auto; display: grid; grid-template-columns: 360px 1fr; gap: 25px; }
+        @media (max-width: 1100px) { .container { grid-template-columns: 1fr; } }
+        
+        .panel { background: var(--bg-panel); border: var(--border); border-radius: 16px; padding: 25px; display: flex; flex-direction: column; gap: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.5); }
+        .panel-header { font-size: 1.1rem; font-weight: 700; color: #fff; border-bottom: 2px solid #1e293b; padding-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+        
+        input { background: #03060f; border: var(--border); color: #fff; padding: 14px; border-radius: 8px; width: 100%; font-size: 0.9rem; }
+        input:focus { border-color: var(--steam-cyan); outline: none; box-shadow: 0 0 10px rgba(0,255,245,0.1); }
+        
+        .btn { background: var(--steam-blue); color: #fff; padding: 14px; border: none; border-radius: 8px; font-weight: 700; cursor: pointer; text-transform: uppercase; width: 100%; font-size: 0.8rem; letter-spacing: 0.5px; }
+        .btn:hover { background: #2563eb; box-shadow: 0 0 15px rgba(16,120,255,0.4); }
+        
+        .terminal { background: #02040a; padding: 20px; border-radius: 10px; border: var(--border); height: 380px; overflow-y: auto; font-family: 'JetBrains Mono', monospace; color: #38bdf8; display: flex; flex-direction: column; gap: 6px; font-size: 0.8rem; }
+        
+        .account-card { background: var(--bg-card); padding: 15px; border-radius: 10px; border: var(--border); display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
+        .status-badge { font-size: 0.75rem; font-weight: 800; padding: 4px 8px; border-radius: 4px; text-transform: uppercase; }
+        .ONLINE { background: rgba(16,185,129,0.15); color: var(--green); }
+        .OFFLINE { background: rgba(239,68,68,0.15); color: var(--red); }
+        .CONNECTING { background: rgba(16,120,255,0.15); color: var(--steam-blue); }
+        
+        .neon { color: var(--steam-cyan); text-shadow: 0 0 10px rgba(0,255,204,0.3); }
+        .ai-panel { background: radial-gradient(circle at top left, #0d1527, var(--bg-panel)); border-color: rgba(0,255,204,0.2); }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <!-- ЛЕВОЕ КРЫЛО УПРАВЛЕНИЯ -->
+    <aside class="panel">
+        <div class="panel-header">Инжектор Ветки Ботов</div>
+        <div style="display:flex; flex-direction:column; gap:12px;">
+            <input type="text" id="username" placeholder="Steam Логин">
+            <input type="password" id="password" placeholder="Steam Пароль">
+            <input type="text" id="shared" placeholder="Shared Secret (Для авто-2FA)">
+            <button class="btn" style="background: var(--green);" onclick="addAccount()">Внедрить аккаунт</button>
+        </div>
+
+        <div class="panel-header" style="border:none; margin-top:10px; padding:0;">Активные процессы в БД:</div>
+        <div id="accounts-container" style="max-height: 250px; overflow-y: auto;">
+            <!-- Сюда вставляются аккаунты -->
+        </div>
+    </aside>
+
+    <!-- ПРАВАЯ МОНИТОР-ПАНЕЛЬ -->
+    <main style="display: flex; flex-direction: column; gap: 25px;">
+        <!-- ИИ МОДУЛЬ -->
+        <div class="panel ai-panel">
+            <div class="panel-header">
+                <span>🤖 TRADING AI AGENT v7.5 [AUTONOMOUS ENGINE]</span>
+                <span class="neon" id="ui-gen" style="font-size:0.85rem;">МУТАЦИЯ ЯДРА: 1</span>
+            </div>
+            <p style="font-style:italic; color:#94a3b8; line-height:1.6; background:#02050c; padding:15px; border-radius:8px; border-left:3px solid var(--steam-cyan);">
+                "Система полностью скорректирована. База данных SQLite отслеживает сессии ботов в ветке. Все трейды сканируются на лету. Нажмите кнопку ниже для адаптации логики к новым алгоритмам Valve."
+            </p>
+        </div>
+
+        <!-- ТЕРМИНАЛ -->
+        <div class="panel">
+            <div class="panel-header">Центральная консоль мониторинга распределенного пула</div>
+            <div class="terminal" id="terminal-box"></div>
+            
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 15px;">
+                <button class="btn" onclick="evolveCore()" style="width: auto; padding: 14px 30px; background: linear-gradient(90deg, #7c3aed, var(--steam-blue));">Эволюция бэкенда & Моделей</button>
+                <div style="font-size: 0.9rem; color: #94a3b8;">Налог торговой площадки: <span id="ui-tax" style="color: #fff; font-weight: bold;">13.04%</span></div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<script>
+    async function updateDashboard() {
+        try {
+            const res = await fetch('/api/dashboard');
+            const data = await res.json();
+
+            document.getElementById('ui-gen').innerText = `МУТАЦИЯ ЯДРА: ${data.generation}`;
+            document.getElementById('ui-tax').innerText = `${(data.taxRate * 100).toFixed(2)}%`;
+
+            // Вывод логов в терминал
+            const term = document.getElementById('terminal-box');
+            term.innerHTML = data.logs.map(log => `<div>${log}</div>`).join('');
+            term.scrollTop = term.scrollHeight;
+
+            // Вывод пула аккаунтов из ветки БД
+            const container = document.getElementById('accounts-container');
+            container.innerHTML = data.accounts.map(acc => `
+                <div class="account-card">
+                    <div>
+                        <div style="font-weight:700; color:#fff;">${acc.username}</div>
+                        <div style="font-size:0.8rem; color:#94a3b8; margin-top:2px;">Баланс: $${acc.balance.toFixed(2)}</div>
+                    </div>
+                    <span class="status-badge ${acc.status}">${acc.status}</span>
+                </div>
+            `).join('');
+
+        } catch (e) { console.error('Ошибка опроса API:', e); }
+    }
+
+    async function addAccount() {
+        const uInput = document.getElementById('username');
+        const pInput = document.getElementById('password');
+        const sInput = document.getElementById('shared');
+
+        if(!uInput.value || !pInput.value) { alert('Заполните обязательные поля!'); return; }
+
+        const payload = { username: uInput.value, password: pInput.value, sharedSecret: sInput.value };
+        
+        await fetch('/api/account/add', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        });
+
+        uInput.value = ''; pInput.value = ''; sInput.value = '';
+        updateDashboard();
+    }
+
+    async function evolveCore() {
+        await fetch('/api/evolve', { method: 'POST' });
+        updateDashboard();
+    }
+
+    setInterval(updateDashboard, 1500);
+    window.onload = updateDashboard;
+</script>
+</body>
+</html>
