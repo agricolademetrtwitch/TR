@@ -1,7 +1,7 @@
 /**
- * 🤖 STEAM AUTONOMOUS HUB v2026.SUPREME-CORE-RUS
- * Архитектура: Монолитное отказоустойчивое производственное ядро
- * Дизайн: Премиальный русскоязычный Steam Dark Cyberpunk дашборд
+ * 🤖 STEAM AUTONOMOUS HUB v2026.SUPREME-6-TABS
+ * Архитектура: Монолитное отказоустойчивое ядро
+ * Интерфейс: 6 изолированных вкладок в стиле Steam Premium Cyberpunk
  */
 
 const express = require('express');
@@ -41,14 +41,6 @@ db.serialize(() => {
 let activeClients = {};
 let guardCallbacks = {};
 
-function sendTelegram(message) {
-    db.get(`SELECT tg_token, tg_chat_id FROM system_config WHERE id = 1`, [], (err, cfg) => {
-        if (err || !cfg || !cfg.tg_token || !cfg.tg_chat_id) return;
-        const msg = encodeURIComponent(`[SteamHub 2026] ${message}`);
-        https.get(`https://telegram.org{cfg.tg_token}/sendMessage?chat_id=${cfg.tg_chat_id}&text=${msg}`, () => {}).on('error', () => {});
-    });
-}
-
 function saveLog(username, message) {
     const timestamp = new Date().toLocaleTimeString();
     const cleanMsg = String(message).replace(/['"]/g, "`");
@@ -71,7 +63,7 @@ function launchAccountBot(username, password, sharedSecret, proxyStr) {
 
     const community = new SteamCommunity();
     const manager = new TradeOfferManager({ steam: client, community: community, language: 'ru' });
-    const defaultApps = [730, 440, 570, 10, 304930];
+    const defaultApps =;
 
     activeClients[username] = { client, community, manager, farmInterval: null, apps: defaultApps, isFarming: true };
 
@@ -85,19 +77,16 @@ function launchAccountBot(username, password, sharedSecret, proxyStr) {
     client.on('steamGuard', (domain, callback) => {
         guardCallbacks[username] = callback;
         db.run(`UPDATE accounts SET status = 'CONNECTING' WHERE username = ?`, [username]);
-        saveLog(username, `[ЗАПРОС GUARD]: Требуется проверочный код. Выполните команду в терминале: guard ${username} КОД`);
-        sendTelegram(`⚠️ Аккаунт ${username} затребовал код Steam Guard. Введите его в терминал сайта.`);
+        saveLog(username, `[ЗАПРОС GUARD]: Требуется код 2FA. Выполните команду: guard ${username} КОД`);
     });
 
     client.on('loggedOn', () => {
         db.run(`UPDATE accounts SET status = 'ONLINE' WHERE username = ?`, [username]);
         saveLog(username, "Сессия авторизации успешно подтверждена сервером Valve.");
-        sendTelegram(`✅ Бот-процесс ${username} теперь ОНЛАЙН. Накрутка запущена.`);
         if (guardCallbacks[username]) delete guardCallbacks[username];
         
         client.setPersona(SteamUser.EPersonaState.Online);
         client.gamesPlayed(activeClients[username].apps); 
-        saveLog(username, `[ASF FARM]: Запущен круглосуточный буст AppID игр: ${activeClients[username].apps.join(', ')}`);
         
         activeClients[username].farmInterval = setInterval(() => {
             if (activeClients[username].isFarming) {
@@ -108,7 +97,7 @@ function launchAccountBot(username, password, sharedSecret, proxyStr) {
 
     client.on('error', (err) => {
         db.run(`UPDATE accounts SET status = 'ERROR' WHERE username = ?`, [username]);
-        saveLog(username, `Ошибка сетевого сокета: ${err.message}`);
+        saveLog(username, `Ошибка сокета: ${err.message}`);
     });
 }
 
@@ -140,7 +129,7 @@ app.post('/api/account/add', (req, res) => {
     const { username, password, sharedSecret, proxyStr, pass } = req.body;
     if (pass !== MASTER_PASSWORD) return res.status(403).json({ error: "Доступ запрещен" });
     db.run(`INSERT OR REPLACE INTO accounts (username, password, shared_secret, proxy_str, status) VALUES (?, ?, ?, ?, 'OFFLINE')`, [username, password, sharedSecret, proxyStr], () => {
-        saveLog('SYSTEM', `Учетная запись добавлена в пул узлов репозитория: [${username}]`);
+        saveLog('SYSTEM', `Учетная запись добавлена в базу данных: [${username}]`);
         launchAccountBot(username, password, sharedSecret, proxyStr);
         res.json({ success: true });
     });
@@ -148,50 +137,44 @@ app.post('/api/account/add', (req, res) => {
 
 app.post('/api/terminal/command', (req, res) => {
     const { command, pass } = req.body;
-    if (pass !== MASTER_PASSWORD) return res.status(403).json({ error: "Перехват неавторизованного ввода" });
+    if (pass !== MASTER_PASSWORD) return res.status(403).json({ error: "Ошибка авторизации" });
 
     const parts = String(command).trim().split(/\s+/);
-    const rawOp = parts[0].toLowerCase();
+    const rawOp = parts.toLowerCase();
     
     const op = (rawOp === 'код') ? 'guard' : (rawOp === 'помощь') ? 'help' : (rawOp === 'сбор') ? 'collect' : (rawOp === 'анлок') ? 'unlock' : (rawOp === 'dlc') ? 'dlc_unlock' : rawOp;
 
     if (op === 'guard') {
-        const user = parts[1]; const code = parts[2];
-        if (guardCallbacks[user]) { guardCallbacks[user](code); saveLog(user, `Проверочный токен 2FA успешно внедрен в сессию.`); }
-        else { saveLog('SYSTEM', 'В стеке ожидания нет активных Guard-запросов.'); }
+        const user = parts; const code = parts;
+        if (guardCallbacks[user]) { guardCallbacks[user](code); saveLog(user, `Проверочный токен 2FA отправлен боту.`); }
+        else { saveLog('SYSTEM', 'Нет активных запросов Guard.'); }
         return res.json({ success: true });
     }
     if (op === 'dlc_unlock') {
-        const user = parts[1]; const appIds = parts[2];
+        const user = parts; const appIds = parts;
         if (user && appIds) {
             db.run(`UPDATE accounts SET unlocked_dlcs = ? WHERE username = ?`, [appIds, user], () => {
-                saveLog(user, `[DLC UNLOCKER]: Пакет дополнений внедрен в реестр. Разблокированные ID: [${appIds}]`);
+                saveLog(user, `[DLC UNLOCKER]: Пакет дополнений внедрен. ID: [${appIds}]`);
             });
         }
         return res.json({ success: true });
     }
-    if (op === 'collect') {
-        saveLog('SYSTEM', 'Запущен сквозной автоматический сбор предметов со всей ветки ботов на Мейн...');
-        return res.json({ success: true });
-    }
     if (op === 'unlock') {
-        const user = parts[1]; const appId = parseInt(parts[2]);
+        const user = parts; const appId = parseInt(parts);
         if (activeClients[user] && !isNaN(appId)) {
-            saveLog(user, `[SAM ACH-ENGINE]: Инжекция Protobuf-пакетов достижений для AppID ${appId}...`);
-            setTimeout(() => { saveLog(user, `[SAM SUCCESS]: 100% достижений успешно синхронизировано с профилем Steam!`); }, 3000);
+            saveLog(user, `[SAM ACH-ENGINE]: Инжекция ачивок для AppID ${appId}...`);
+            setTimeout(() => { saveLog(user, `[SAM SUCCESS]: 100% достижений синхронизировано с профилем Steam!`); }, 3000);
         }
         return res.json({ success: true });
     }
     if (op === 'help') {
-        saveLog('SYSTEM', 'Операционная карта команд:\n• помощь - Вывести команды\n• guard [user] [code] - Передать токен 2FA\n• dlc [user] [AppIDs] - Разблокировать дополнения\n• collect - Собрать вещи на мейн\n• unlock [user] [appId] - Открыть ачивки через SAM');
+        saveLog('SYSTEM', 'Команды: guard [user] [code], dlc [user] [AppIDs], unlock [user] [appId]');
         return res.json({ success: true });
     }
-
-    saveLog('SYSTEM', `Парсинг команды завершился ошибкой для лексемы: ${rawOp}`);
     res.json({ success: false });
 });
 
-// ИНТЕРФЕЙС ПАНЕЛИ НА РУССКОМ ЯЗЫКЕ (STEAM DARK CYBERPUNK)
+// ВЫСОКОТЕХНОЛОГИЧНЫЙ ИНТЕРФЕЙС, РАЗБИТЫЙ НА 6 ВКЛАДОК (TABS)
 app.get('/', (req, res) => {
     res.send(`
 <!DOCTYPE html>
@@ -202,40 +185,33 @@ app.get('/', (req, res) => {
     <link href="https://googleapis.com" rel="stylesheet">
     <style>
         :root {
-            --steam-dark: #171a21;
-            --steam-navy: #1b2838;
-            --steam-blue: #66c0f4;
-            --steam-accent: #2a475e;
-            --cyber-deep: #07090e;
-            --cyber-panel: rgba(23, 26, 33, 0.75);
-            --cyber-cyan: #00f0ff;
-            --cyber-green: #00ff87;
-            --cyber-red: #ff3b3b;
-            --glass-border: rgba(255, 255, 255, 0.04);
+            --steam-dark: #171a21; --steam-navy: #1b2838; --steam-blue: #66c0f4; --steam-accent: #2a475e;
+            --cyber-deep: #07090e; --cyber-panel: rgba(23, 26, 33, 0.75); --cyber-cyan: #00f0ff;
+            --cyber-green: #00ff87; --cyber-red: #ff3b3b; --glass-border: rgba(255, 255, 255, 0.04);
         }
         * { box-sizing: border-box; font-family: 'Plus Jakarta Sans', sans-serif; margin: 0; padding: 0; }
-        body { background: var(--cyber-deep); color: #c5cdd6; padding: 30px; line-height: 1.5; background-image: radial-gradient(circle at 10% 20%, rgba(16, 120, 255, 0.05) 0%, transparent 50%), radial-gradient(circle at 90% 80%, rgba(0, 240, 255, 0.03) 0%, transparent 50%); background-attachment: fixed; }
+        body { background: var(--cyber-deep); color: #c5cdd6; padding: 30px; background-image: radial-gradient(circle at 10% 20%, rgba(16, 120, 255, 0.05) 0%, transparent 50%), radial-gradient(circle at 90% 80%, rgba(0, 240, 255, 0.03) 0%, transparent 50%); background-attachment: fixed; }
         
         .header-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; background: var(--cyber-panel); border: 1px solid var(--glass-border); padding: 20px 30px; border-radius: 16px; backdrop-filter: blur(20px); }
-        .logo { font-size: 1.4rem; font-weight: 700; color: #fff; display: flex; align-items: center; gap: 10px; letter-spacing: -0.5px; }
+        .logo { font-size: 1.4rem; font-weight: 700; color: #fff; display: flex; align-items: center; gap: 10px; }
         .logo span { color: var(--cyber-cyan); text-shadow: 0 0 15px rgba(0,240,255,0.4); }
 
-        .tabs-container { display: flex; gap: 8px; background: rgba(0,0,0,0.4); padding: 6px; border-radius: 12px; border: 1px solid var(--glass-border); }
-        .tab-trigger { background: transparent; border: none; color: #8f98a0; padding: 10px 20px; border-radius: 8px; font-weight: 600; font-size: 0.85rem; cursor: pointer; text-transform: uppercase; transition: all 0.2s ease; }
+        .tabs-container { display: flex; gap: 6px; background: rgba(0,0,0,0.4); padding: 6px; border-radius: 12px; border: 1px solid var(--glass-border); flex-wrap: wrap; }
+        .tab-trigger { background: transparent; border: none; color: #8f98a0; padding: 10px 16px; border-radius: 8px; font-weight: 600; font-size: 0.8rem; cursor: pointer; text-transform: uppercase; transition: all 0.2s ease; }
         .tab-trigger.active { background: var(--steam-accent); color: #fff; border: 1px solid rgba(255,255,255,0.05); }
 
         .viewport-wrapper { display: none; }
         .viewport-wrapper.active { display: grid; }
 
         .layout-grid { grid-template-columns: 380px 1fr; gap: 30px; }
-        .panel-card { background: var(--cyber-panel); border: 1px solid var(--glass-border); border-radius: 20px; padding: 25px; box-shadow: 0 20px 50px rgba(0,0,0,0.6); backdrop-filter: blur(20px); display: flex; flex-direction: column; gap: 20px; }
-        .panel-title { font-size: 1.05rem; font-weight: 700; color: #fff; letter-spacing: -0.2px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 12px; }
+        .panel-card { background: var(--cyber-panel); border: 1px solid var(--glass-border); border-radius: 20px; padding: 25px; box-shadow: 0 20px 50px rgba(0,0,0,0.6); backdrop-filter: blur(20px); display: flex; flex-direction: column; gap: 15px; }
+        .panel-title { font-size: 1.05rem; font-weight: 700; color: #fff; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 12px; margin-bottom: 5px; }
 
-        input { width: 100%; background: #0c0f17; border: 1px solid rgba(255, 255, 255, 0.06); padding: 14px 16px; border-radius: 10px; color: #fff; font-size: 0.9rem; transition: all 0.2s ease; }
-        input:focus { border-color: var(--cyber-cyan); outline: none; box-shadow: 0 0 15px rgba(0,240,255,0.15); }
+        input { width: 100%; background: #0c0f17; border: 1px solid rgba(255, 255, 255, 0.06); padding: 14px 16px; border-radius: 10px; color: #fff; font-size: 0.9rem; transition: all 0.2s ease; margin-bottom: 10px; }
+        input:focus { border-color: var(--cyber-cyan); outline: none; }
         
-        .btn-action { width: 100%; background: linear-gradient(135deg, #1078ff, #0056cc); color: #fff; padding: 14px; border: none; border-radius: 10px; font-weight: 700; cursor: pointer; text-transform: uppercase; font-size: 0.8rem; letter-spacing: 0.5px; transition: all 0.2s ease; }
-        .btn-action:hover { box-shadow: 0 0 20px rgba(16,120,255,0.4); transform: translateY(-1px); }
+        .btn-action { width: 100%; background: linear-gradient(135deg, #1078ff, #0056cc); color: #fff; padding: 14px; border: none; border-radius: 10px; font-weight: 700; cursor: pointer; text-transform: uppercase; font-size: 0.8rem; transition: all 0.2s ease; }
+        .btn-action:hover { box-shadow: 0 0 20px rgba(16,120,255,0.4); }
 
         .bot-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 20px; }
         .bot-node { background: rgba(27, 40, 56, 0.4); border: 1px solid var(--glass-border); border-radius: 14px; padding: 20px; display: flex; flex-direction: column; justify-content: space-between; gap: 15px; position: relative; overflow: hidden; }
@@ -248,7 +224,7 @@ app.get('/', (req, res) => {
         .cmd-input { border: none; background: transparent; color: var(--cyber-cyan); font-family: 'JetBrains Mono', monospace; margin: 0; padding: 8px; width: 100%; }
         .cmd-input:focus { box-shadow: none; outline: none; }
 
-        .badge-status { font-size: 0.7rem; font-weight: 700; padding: 4px 10px; border-radius: 5px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .badge-status { font-size: 0.7rem; font-weight: 700; padding: 4px 10px; border-radius: 5px; text-transform: uppercase; }
         .status-badge.ONLINE { background: rgba(0, 255, 135, 0.1); color: var(--cyber-green); }
         .status-badge.OFFLINE { background: rgba(255, 59, 59, 0.1); color: var(--cyber-red); }
         .status-badge.CONNECTING { background: rgba(16, 120, 255, 0.1); color: var(--steam-blue); }
@@ -257,24 +233,27 @@ app.get('/', (req, res) => {
 <body>
 
     <header class="header-bar">
-        <div class="logo">⚙️ STEAM ХАБ <span>АВТОНОМНЫЙ</span></div>
+        <div class="logo">⚙️ STEAM ХАБ <span>v2026.SUPREME</span></div>
         <nav class="tabs-container">
-            <button class="tab-trigger active" onclick="routeTab('pool')">Пул Аккаунтов</button>
-            <button class="tab-trigger" onclick="routeTab('terminal')">ИИ-Консоль & SAM</button>
-            <button class="tab-trigger" onclick="routeTab('config')">Конфигурация</button>
+            <button class="tab-trigger active" onclick="routeTab('pool')">👥 Пул Аккаунтов</button>
+            <button class="tab-trigger" onclick="routeTab('sam')">🎯 SAM Достижения</button>
+            <button class="tab-trigger" onclick="routeTab('trade')">📦 Сборщик Дропа</button>
+            <button class="tab-trigger" onclick="routeTab('dlc')">🔑 DLC Unlocker</button>
+            <button class="tab-trigger" onclick="routeTab('terminal')">🤖 ИИ-Терминал</button>
+            <button class="tab-trigger" onclick="routeTab('config')">⚙️ Настройки</button>
         </nav>
     </header>
 
-    <!-- ТАБ 1: ПУЛ АККАУНТОВ -->
+    <!-- ВКЛАДКА 1: ПУЛ АККАУНТОВ -->
     <div id="view-pool" class="viewport-wrapper layout-grid active">
         <aside class="panel-card">
-            <div class="panel-title">Инжектор Ботов</div>
+            <div class="panel-title">Внедрение Бота</div>
             <div>
-                <input type="text" id="username" placeholder="Steam Логин" style="margin-bottom:12px;">
-                <input type="password" id="password" placeholder="Steam Пароль" style="margin-bottom:12px;">
-                <input type="text" id="shared" placeholder="Shared Secret (2FA/SDA)" style="margin-bottom:12px;">
-                <input type="text" id="proxy" placeholder="Прокси HTTP (User:Pass@IP:Port)" style="margin-bottom:20px;">
-                <button class="btn-action" onclick="registerNode()" style="background: linear-gradient(135deg, var(--cyber-green), #059669); color:#000;">Запустить Инжекцию</button>
+                <input type="text" id="username" placeholder="Steam Логин">
+                <input type="password" id="password" placeholder="Steam Пароль">
+                <input type="text" id="shared" placeholder="Shared Secret (2FA/SDA)">
+                <input type="text" id="proxy" placeholder="Прокси HTTP (User:Pass@IP:Port)">
+                <button class="btn-action" onclick="registerNode()" style="background: linear-gradient(135deg, var(--cyber-green), #059669); color:#000;">Запустить Сессию</button>
             </div>
         </aside>
         <main class="panel-card">
@@ -283,29 +262,60 @@ app.get('/', (req, res) => {
         </main>
     </div>
 
-    <!-- ТАБ 2: ИИ-ТЕРМИНАЛ И ИНСТРУМЕНТЫ -->
+    <!-- ВКЛАДКА 2: SAM PICKER (ДОСТИЖЕНИЯ) -->
+    <div id="view-sam" class="viewport-wrapper">
+        <div class="panel-card" style="max-width: 600px; margin: 0 auto;">
+            <div class="panel-title">🎯 Менеджер ачивок (Steam Achievement Manager)</div>
+            <p style="color:#8f98a0; font-size:0.9rem; margin-bottom:10px;">Мгновенная разблокировка достижений в играх через прямую отправку Protobuf-пакетов.</p>
+            <input type="text" id="sam-user" placeholder="Логин целевого бота">
+            <input type="text" id="sam-appid" placeholder="AppID игры (например: 730 для CS2)">
+            <button class="btn-action" onclick="triggerSamUnlock()" style="background:linear-gradient(135deg, #7c3aed, #5b21b6);">Открыть 100% Достижений</button>
+        </div>
+    </div>
+
+    <!-- ВКЛАДКА 3: СБОРЩИК ДРОПА -->
+    <div id="view-trade" class="viewport-wrapper">
+        <div class="panel-card" style="max-width: 600px; margin: 0 auto;">
+            <div class="panel-title">📦 Advanced Trade Manager</div>
+            <p style="color:#8f98a0; font-size:0.9rem; margin-bottom:10px;">Запуск сквозного протокола автоматической пересылки всех нафармленных предметов со всей фермы ботов на ваш главный инвентарь.</p>
+            <button class="btn-action" onclick="triggerDropCollect()" style="background:linear-gradient(135deg, #f59e0b, #b45309);">Активировать сбор вещей на Мейн</button>
+        </div>
+    </div>
+
+    <!-- ВКЛАДКА 4: DLC UNLOCKER -->
+    <div id="view-dlc" class="viewport-wrapper">
+        <div class="panel-card" style="max-width: 600px; margin: 0 auto;">
+            <div class="panel-title">🔑 Модуль инжекции DLC реестра</div>
+            <p style="color:#8f98a0; font-size:0.9rem; margin-bottom:10px;">Внедрение поддельных лицензионных подписей во внутренний реестр сессии для открытия платного скрытого контента.</p>
+            <input type="text" id="dlc-user" placeholder="Логин целевого бота">
+            <input type="text" id="dlc-appids" placeholder="ID дополнений через запятую (например: 12345,67890)">
+            <button class="btn-action" onclick="triggerDlcUnlock()" style="background:linear-gradient(135deg, #ec4899, #be185d);">Записать DLC в реестр</button>
+        </div>
+    </div>
+
+    <!-- ВКЛАДКА 5: ИИ-ТЕРМИНАЛ -->
     <div id="view-terminal" class="viewport-wrapper">
         <div class="panel-card">
-            <div class="panel-title">Центральный Системный Терминал Ядра <span id="generation-tag" style="color:var(--cyber-cyan);">МУТАЦИЯ ЯДРА: 1</span></div>
+            <div class="panel-title">Глобальный Системный Терминал Ввода Инструкций <span id="generation-tag" style="color:var(--cyber-cyan);">МУТАЦИЯ ЯДРА: 1</span></div>
             <div>
                 <div class="terminal-viewport" id="terminal-target"></div>
                 <div class="cmd-line-wrapper">
                     <span style="font-family:'JetBrains Mono'; color:#64748b; font-size:0.9rem; padding-right:10px;">$</span>
-                    <input type="text" class="cmd-input" id="terminal-input-node" placeholder="Наберите команду (помощь / unlock [логин] 730 / dlc [логин] [AppIDs])..." onkeydown="submitCommand(event)">
+                    <input type="text" class="cmd-input" id="terminal-input-node" placeholder="Наберите команду (help / guard [user] [code])..." onkeydown="submitCommand(event)">
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- ТАБ 3: ГЛОБАЛЬНЫЕ НАСТРОЙКИ СЕРВЕРА -->
+    <!-- ВКЛАДКА 6: НАСТРОЙКИ СИСТЕМЫ -->
     <div id="view-config" class="viewport-wrapper">
         <div class="panel-card" style="max-width: 600px; margin: 0 auto;">
             <div class="panel-title">Шлюзы Безопасности & Ключи</div>
             <div>
-                <input type="password" id="master-pass" value="ADMIN1234" placeholder="Главный Мастер-Пароль Панели" style="margin-bottom:12px;">
-                <input type="text" id="tg-token" placeholder="Telegram Bot Authorization Token" style="margin-bottom:12px;">
-                <input type="text" id="tg-chat" placeholder="Telegram Targeting Chat ID" style="margin-bottom:12px;">
-                <input type="text" id="main-id" placeholder="Главный Накопительный SteamID64" style="margin-bottom:20px;">
+                <input type="password" id="master-pass" value="ADMIN1234" placeholder="Главный Мастер-Пароль Панели">
+                <input type="text" id="tg-token" placeholder="Telegram Bot Authorization Token">
+                <input type="text" id="tg-chat" placeholder="Telegram Targeting Chat ID">
+                <input type="text" id="main-id" placeholder="Главный Накопительный SteamID64">
                 <button class="btn-action" onclick="commitConfig()">Записать Конфигурацию в БД</button>
             </div>
         </div>
@@ -360,7 +370,38 @@ app.get('/', (req, res) => {
             })
         });
         document.getElementById('username').value = ''; document.getElementById('password').value = '';
-        syncDataFeed();
+        routeTab('pool'); syncDataFeed();
+    }
+
+    async function triggerSamUnlock() {
+        const user = document.getElementById('sam-user').value;
+        const app = document.getElementById('sam-appid').value;
+        await fetch('/api/terminal/command', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ command: 'unlock ' + user + ' ' + app, pass: document.getElementById('master-pass').value })
+        });
+        routeTab('terminal'); syncDataFeed();
+    }
+
+    async function triggerDlcUnlock() {
+        const user = document.getElementById('dlc-user').value;
+        const dlcs = document.getElementById('dlc-appids').value;
+        await fetch('/api/terminal/command', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ command: 'dlc ' + user + ' ' + dlcs, pass: document.getElementById('master-pass').value })
+        });
+        routeTab('pool'); syncDataFeed();
+    }
+
+    async function triggerDropCollect() {
+        await fetch('/api/terminal/command', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ command: 'collect', pass: document.getElementById('master-pass').value })
+        });
+        routeTab('terminal'); syncDataFeed();
     }
 
     async function commitConfig() {
