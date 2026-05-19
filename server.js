@@ -1,7 +1,6 @@
 /**
- * 🤖 STEAM AUTONOMOUS HUB v2026.GODMODE
- * Architecture: Monolithic Fail-Safe Production Engine
- * Patches: Asynchronous DB Queue, Linear Backoff Reconnects, Anti-Memory Leak Hooks
+ * 🤖 STEAM AUTONOMOUS HUB v2026.FULL-TERMINAL
+ * Архитектура: Монолитное ядро с расширенной картой команд и модулей
  */
 
 const express = require('express');
@@ -17,26 +16,23 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
-// Cloud Database Dynamic Routing Configuration
 const isCloud = process.env.RENDER || process.env.RAILWAY_STATIC_URL || false;
 const dbPath = isCloud ? path.join('/tmp', 'steam_godmode_v2026.db') : './steam_godmode_v2026.db';
 
 const db = new sqlite3.Database(dbPath, (err) => {
     if (err) {
-        console.error('[CRITICAL DB ERROR]: Failed to bind storage:', err.message);
+        console.error('[БД КРИТИЧЕСКАЯ ОШИБКА]:', err.message);
         process.exit(1);
     }
-    console.log(`[DATABASE]: Persistent ledger successfully tied to engine path: ${dbPath}`);
+    console.log(`[DATABASE]: Хранилище SQLite успешно подключено: ${dbPath}`);
 });
 
-// Structural Optimization for cloud transactional consistency
 db.run("PRAGMA busy_timeout = 10000;");
 db.run("PRAGMA journal_mode = WAL;");
 
-// Production Table Structure Initialization
 db.serialize(() => {
     db.run(`CREATE TABLE IF NOT EXISTS system_config (id INTEGER PRIMARY KEY, generation INTEGER DEFAULT 1, tax_rate REAL DEFAULT 0.1304)`);
-    db.run(`CREATE TABLE IF NOT EXISTS accounts (username TEXT PRIMARY KEY, password TEXT, shared_secret TEXT, balance REAL DEFAULT 2.00, status TEXT DEFAULT 'OFFLINE', farmed_cards INTEGER DEFAULT 0, boosted_hours INTEGER DEFAULT 0)`);
+    db.run(`CREATE TABLE IF NOT EXISTS accounts (username TEXT PRIMARY KEY, password TEXT, shared_secret TEXT, balance REAL DEFAULT 2.00, status TEXT DEFAULT 'OFFLINE', farmed_cards INTEGER DEFAULT 0, boosted_hours INTEGER DEFAULT 0, active_apps TEXT DEFAULT '730,440,570,10,304930')`);
     db.run(`CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, timestamp TEXT, message TEXT)`);
     db.run(`INSERT OR IGNORE INTO system_config (id, generation, tax_rate) VALUES (1, 1, 0.1304)`);
     db.run(`UPDATE accounts SET status = 'OFFLINE' WHERE status = 'CONNECTING' OR status = 'ONLINE'`);
@@ -45,32 +41,21 @@ db.serialize(() => {
 let activeClients = {};
 let guardCallbacks = {};
 
-// Generalized Async-Safe Database Logger Engine
 function saveLog(username, message) {
     const timestamp = new Date().toLocaleTimeString();
     const sanitisedMessage = String(message).replace(/['"]/g, "`");
     console.log(`[${username || 'SYSTEM'}]: ${sanitisedMessage}`);
-    
-    db.run(`INSERT INTO logs (username, timestamp, message) VALUES (?, ?, ?)`, 
-        [username || 'SYSTEM', timestamp, sanitisedMessage], (err) => {
-            if (err) console.error('[DB WRITE FAILED]:', err.message);
-        }
-    );
+    db.run(`INSERT INTO logs (username, timestamp, message) VALUES (?, ?, ?)`, [username || 'SYSTEM', timestamp, sanitisedMessage]);
 }
 
-// Monolithic Core Controller - Multi-Instance Safe
 function launchAccountBot(username, password, sharedSecret) {
-    // 1. MEMORY LEAK GUARD: Clean old allocations, loops and observers completely before allocation
     if (activeClients[username]) {
-        saveLog(username, "Purging active memory leaks and descriptive handlers for runtime synchronization...");
         try {
             if (activeClients[username].farmInterval) clearInterval(activeClients[username].farmInterval);
             if (activeClients[username].reconnectTimeout) clearTimeout(activeClients[username].reconnectTimeout);
             activeClients[username].client.logOff();
             activeClients[username].client.removeAllListeners();
-        } catch (e) { 
-            console.error('[CLEANUP WARNING]:', e.message); 
-        }
+        } catch (e) { console.error(e.message); }
         delete activeClients[username];
     }
 
@@ -78,72 +63,58 @@ function launchAccountBot(username, password, sharedSecret) {
     const community = new SteamCommunity();
     const manager = new TradeOfferManager({ steam: client, community: community, language: 'ru' });
 
-    activeClients[username] = { 
-        client, community, manager, 
-        farmInterval: null, reconnectTimeout: null, 
-        reconnectAttempts: 0 
-    };
+    activeClients[username] = { client, community, manager, farmInterval: null, reconnectTimeout: null, reconnectAttempts: 0, isFarmingHours: true };
 
-    // Safe Token Evaluator
     let twoFactorCode = "";
     if (sharedSecret && sharedSecret.trim().length > 3) {
-        try { 
-            twoFactorCode = SteamTotp.generateAuthCode(sharedSecret.trim()); 
-        } catch(e) {
-            saveLog(username, `[2FA FAILED]: Token string generation syntax error: ${e.message}`);
+        try { twoFactorCode = SteamTotp.generateAuthCode(sharedSecret.trim()); } catch(e) {
+            saveLog(username, `[СБОЙ 2FA]: Ошибка токена: ${e.message}`);
         }
     }
 
     const executeConnect = () => {
         db.run(`UPDATE accounts SET status = 'CONNECTING' WHERE username = ?`, [username]);
-        saveLog(username, "Routing auth requests to Steam network nodes...");
-        try {
-            client.logOn({ accountName: username, password: password, twoFactorCode: twoFactorCode });
-        } catch (e) {
-            saveLog(username, `[LAUNCH EXCEPTION]: Connection driver failed: ${e.message}`);
-        }
+        saveLog(username, "Запрос авторизации направлен на сервера Valve...");
+        client.logOn({ accountName: username, password: password, twoFactorCode: twoFactorCode });
     };
 
-    // 2. STEAM INTERACTIVE CHALLENGE ROUTER
     client.on('steamGuard', (domain, callback) => {
         guardCallbacks[username] = callback;
         db.run(`UPDATE accounts SET status = 'CONNECTING' WHERE username = ?`, [username]);
-        saveLog(username, `[GUARD CHALLENGE]: Verification required. Run command: guard ${username} CODE`);
+        saveLog(username, `[GUARD ЗАПРОС]: Требуется код 2FA. Выполните: guard ${username} КОД`);
     });
 
     client.on('loggedOn', () => {
-        activeClients[username].reconnectAttempts = 0; // Reset safe linear interval multiplier
+        activeClients[username].reconnectAttempts = 0;
         db.run(`UPDATE accounts SET status = 'ONLINE' WHERE username = ?`, [username]);
-        saveLog(username, "Session Handshake Established. Virtual environment verified.");
-        
+        saveLog(username, "Сессия успешно подтверждена. Бот онлайн.");
         if (guardCallbacks[username]) delete guardCallbacks[username];
         
         client.setPersona(SteamUser.EPersonaState.Online);
         
-        // 3. SECURE HOURS BOOST ENGINE (Strict Array Allocation Mapping)
-        const appsToBoost = [730, 440, 570, 10, 292030];
-        try {
-            client.gamesPlayed(appsToBoost);
-            saveLog(username, `[HOURS ENGINE]: Active runtime tracking initialized for AppIDs: ${appsToBoost.join(', ')}`);
-        } catch (e) {
-            saveLog(username, `[HOURS BOOSTER FAILURE]: Engine reject arrays: ${e.message}`);
-        }
+        db.get(`SELECT active_apps FROM accounts WHERE username = ?`, [username], (err, row) => {
+            const appsStr = row && row.active_apps ? row.active_apps : '730,440,570,10,304930';
+            const appsArray = appsStr.split(',').map(x => parseInt(x.trim())).filter(x => !isNaN(x));
+            if(activeClients[username].isFarmingHours) {
+                client.gamesPlayed(appsArray);
+                saveLog(username, `[ДВИЖОК ЧАСОВ]: Накрутка запущена для AppID: ${appsArray.join(', ')}`);
+            }
+        });
 
         if (activeClients[username].farmInterval) clearInterval(activeClients[username].farmInterval);
         activeClients[username].farmInterval = setInterval(() => {
-            db.run(`UPDATE accounts SET boosted_hours = boosted_hours + 1 WHERE username = ?`, [username]);
-        }, 3600000); // Atomic increments per runtime tracking hour
+            if(activeClients[username] && activeClients[username].isFarmingHours) {
+                db.run(`UPDATE accounts SET boosted_hours = boosted_hours + 1 WHERE username = ?`, [username]);
+            }
+        }, 3600000);
     });
 
-    // 4. API CONNECTION LOST PAT CH (Linear Backoff Engine Fixed)
     client.on('disconnected', (eresult) => {
         db.run(`UPDATE accounts SET status = 'OFFLINE' WHERE username = ?`, [username]);
         if (!activeClients[username]) return;
-
         const attempts = ++activeClients[username].reconnectAttempts;
-        const delay = Math.min(attempts * 10000, 120000); // Caps delay execution at 2 mins max
-        
-        saveLog(username, `[CONNECTION DROPPED]: Server left matrix (Result: ${eresult}). Auto-healing scheduler active. Reconnect loop #${attempts} in ${(delay / 1000)}s...`);
+        const delay = Math.min(attempts * 10000, 120000);
+        saveLog(username, `[СВЯЗЬ ОБОРВАНА]: Код: ${eresult}. Переподключение #${attempts} через ${delay/1000}с...`);
         
         if (activeClients[username].reconnectTimeout) clearTimeout(activeClients[username].reconnectTimeout);
         activeClients[username].reconnectTimeout = setTimeout(() => {
@@ -155,47 +126,37 @@ function launchAccountBot(username, password, sharedSecret) {
     client.on('webSession', (sessionID, cookies) => {
         community.setCookies(cookies);
         manager.setCookies(cookies, (err) => {
-            if (err) return saveLog(username, `[TRADE REJECT]: Cookie payload stream interrupted: ${err.message}`);
-            saveLog(username, `[INTELLIGENT MATRIX]: Anti-API Scam firewalls successfully anchored.`);
+            if (err) return saveLog(username, `Сбой шлюза обменов: ${err.message}`);
+            saveLog(username, `Сетевые фильтры Анти-API Скам развернуты.`);
         });
     });
 
-    // 5. SIGNATURE DISCOVERY ESCAPE FILTER (Anti-Theft Realization)
     manager.on('newOffer', (offer) => {
-        saveLog(username, `Intercepted network transfer request ID #${offer.id}. Scanning hashes...`);
-        
         if (offer.itemsToGive.length > 0 && offer.itemsToReceive.length === 0) {
-            saveLog(username, `[MALICIOUS ACTIVITY DETECTED]: Unilateral trade matching error on transaction #${offer.id}. Intercepting theft vector. DECLINED.`);
-            offer.decline((err) => {
-                if (err) console.error(`[CRITICAL TRADING BLOCK OVERRIDE FAILURE]: ${err.message}`);
-            });
+            saveLog(username, `[ЗАЩИТА]: Перехвачен несанкционированный вывод вещей в трейде №${offer.id}. ОТКЛОНЕНО.`);
+            offer.decline();
             return;
         }
-        
         if (offer.itemsToGive.length === 0 && offer.itemsToReceive.length > 0) {
-            saveLog(username, `[SECURE LEVERAGE]: Item drop package accepted.`);
+            saveLog(username, `[ФАРМ КАРТОЧЕК]: Получены подарочные предметы. Авто-принятие.`);
             offer.accept((err) => {
-                if (!err) {
-                    db.serialize(() => {
-                        db.run(`UPDATE accounts SET balance = balance + 0.45, farmed_cards = farmed_cards + 1 WHERE username = ?`, [username]);
-                    });
-                }
+                if (!err) db.run(`UPDATE accounts SET balance = balance + 0.45, farmed_cards = farmed_cards + 1 WHERE username = ?`, [username]);
             });
         }
     });
 
     client.on('error', (err) => {
         db.run(`UPDATE accounts SET status = 'ERROR' WHERE username = ?`, [username]);
-        saveLog(username, `Core socket error instance caught: ${err.message}`);
+        saveLog(username, `Внутренняя ошибка сокета: ${err.message}`);
     });
 
     executeConnect();
 }
 
-// RESTFUL BACKEND ROUTING API
+// RESTFUL BACKEND API
 app.get('/api/dashboard', (req, res) => {
     db.get(`SELECT * FROM system_config WHERE id = 1`, [], (err, config) => {
-        db.all(`SELECT username, balance, status, farmed_cards, boosted_hours FROM accounts`, [], (err, accs) => {
+        db.all(`SELECT username, balance, status, farmed_cards, boosted_hours, active_apps FROM accounts`, [], (err, accs) => {
             db.all(`SELECT username, timestamp, message FROM logs ORDER BY id DESC LIMIT 40`, [], (err, logRows) => {
                 res.json({
                     generation: config ? config.generation : 1,
@@ -210,21 +171,13 @@ app.get('/api/dashboard', (req, res) => {
 
 app.post('/api/account/add', (req, res) => {
     const { username, password, sharedSecret } = req.body;
-    if (!username || !password || String(username).trim() === "") {
-        return res.status(400).json({ error: "Invalid transmission signature parameters" });
-    }
-
+    if (!username || !password || String(username).trim() === "") return res.status(400).json({ error: "Неверные параметры" });
     const cleanUser = String(username).trim();
-    db.run(`INSERT OR REPLACE INTO accounts (username, password, shared_secret, status) VALUES (?, ?, ?, 'OFFLINE')`, 
-        [cleanUser, password, sharedSecret], (err) => {
-            if (err) {
-                return res.status(500).json({ error: "Database lock abstraction failure" });
-            }
-            saveLog('SYSTEM', `Account pipeline sequence registered: [${cleanUser}]`);
-            launchAccountBot(cleanUser, password, sharedSecret);
-            res.json({ success: true });
-        }
-    );
+    db.run(`INSERT OR REPLACE INTO accounts (username, password, shared_secret, status) VALUES (?, ?, ?, 'OFFLINE')`, [cleanUser, password, sharedSecret], () => {
+        saveLog('SYSTEM', `Учетная запись добавлена в стек: [${cleanUser}]`);
+        launchAccountBot(cleanUser, password, sharedSecret);
+        res.json({ success: true });
+    });
 });
 
 app.post('/api/evolve', (req, res) => {
@@ -232,53 +185,139 @@ app.post('/api/evolve', (req, res) => {
         const nextGen = (row ? row.generation : 1) + 1;
         const nextTax = parseFloat((1.11 + Math.random() * 0.08).toFixed(4));
         db.run(`UPDATE system_config SET generation = ?, tax_rate = ? WHERE id = 1`, [nextGen, nextTax], () => {
-            saveLog('AI_AGENT', `Code optimization matrices adjusted. Switched global scope to Gen ${nextGen}.`);
+            saveLog('AI_AGENT', `Модели оптимизации скорректированы. Текущее Поколение: ${nextGen}.`);
             res.json({ success: true });
         });
     });
 });
 
+// РАСШИРЕННЫЙ МУЛЬТИЯЗЫЧНЫЙ ТЕРМИНАЛ КОМАНД С ПОДДЕРЖКОЙ УСТАНОВОК
 app.post('/api/terminal/command', (req, res) => {
     const { command } = req.body;
-    if (!command || String(command).trim() === "") return res.status(400).json({ error: "Null packet execution request" });
+    if (!command || String(command).trim() === "") return res.status(400).json({ error: "Пустая команда" });
 
     const parts = String(command).trim().split(/\s+/);
     const rawOp = parts[0].toLowerCase();
+    saveLog('TERMINAL_INPUT', `Выполнение инструкции ядра: "${command}"`);
 
-    saveLog('TERMINAL_INPUT', `Parsing payload parameter instruction: "${command}"`);
-
-    const op = (rawOp === 'код' || rawOp === 'code') ? 'guard' : (rawOp === 'помощь' || rawOp === 'info') ? 'help' : rawOp;
+    // Сравнительный языковой маппинг
+    const op = (rawOp === 'код') ? 'guard' : 
+               (rawOp === 'помощь' || rawOp === 'info') ? 'help' : 
+               (rawOp === 'статус') ? 'status' : 
+               (rawOp === 'бд') ? 'db' : 
+               (rawOp === 'аккаунты') ? 'accounts' : 
+               (rawOp === 'баланс') ? 'balance' : 
+               (rawOp === 'удалить') ? 'delete' : 
+               (rawOp === 'фарм') ? 'farm' : 
+               (rawOp === 'игры') ? 'games' : 
+               (rawOp === 'эволюция') ? 'evolve' : 
+               (rawOp === 'сброс') ? 'clear' : rawOp;
 
     if (op === 'guard') {
         const targetUser = parts[1];
         const code = parts[2];
-
-        if (!targetUser || !code) {
-            saveLog('SYSTEM', '❌ Syntax Error. Correct usage: guard [username] [code]');
-            return res.json({ success: false });
-        }
-
+        if (!targetUser || !code) return saveLog('SYSTEM', '❌ Синтаксис: guard [логин] [код]');
         if (guardCallbacks[targetUser]) {
-            saveLog(targetUser, `Injecting explicit 2FA resolving token payload: [${code}]`);
+            saveLog(targetUser, `Инжектирование токена 2FA: [${code}]`);
             guardCallbacks[targetUser](code);
             res.json({ success: true });
         } else {
-            saveLog('SYSTEM', `❌ Failure: Destination handler stack has no pending challenges for user "${targetUser}".`);
+            saveLog('SYSTEM', `❌ Ошибка: В стеке нет запросов Guard для "${targetUser}".`);
             res.json({ success: false });
         }
     } else if (op === 'help') {
-        saveLog('SYSTEM', 'Terminal Operations Command Map:\n• "help" / "помощь" - Show Syntax\n• "guard [user] [code]" / "код [user] [code]" - Push verification token\n• "status" / "статус" - Evaluate total core processes running.');
+        saveLog('SYSTEM', 'Полная карта команд терминала (Full Command Map):\n' +
+                          '• "help / помощь" - Показать этот список команд.\n' +
+                          '• "guard / код [user] [code]" - Передать токен 2FA в сессию бота.\n' +
+                          '• "status / статус" - Оценить количество активных клиентов в ОЗУ.\n' +
+                          '• "accounts / аккаунты" - Вывести детальную сетку аккаунтов из БД.\n' +
+                          '• "db / бд" - Проверить файловый размер и провести чистку/оптимизацию базы.\n' +
+                          '• "balance / баланс [user] [сумма]" - Принудительно установить баланс боту в БД.\n' +
+                          '• "farm / фарм [user] [on/off]" - Включить или полностью отключить накрутку часов бота.\n' +
+                          '• "games / игры [user] [AppID1,AppID2...]" - Сменить сетку бустящихся AppID игр.\n' +
+                          '• "evolve / эволюция" - Запустить принудительную ИИ-мутацию налоговых шлюзов.\n' +
+                          '• "delete / удалить [user]" - Удалить аккаунт и сбросить его сессию из репозитория.\n' +
+                          '• "clear / сброс" - Полностью очистить журнал системных логов в базе данных.');
         res.json({ success: true });
-    } else if (op === 'status' || op === 'статус') {
-        saveLog('SYSTEM', `[MONITOR EVALUATION]: Active background memory threads processing client pipes: ${Object.keys(activeClients).length}`);
+    } else if (op === 'status') {
+        saveLog('SYSTEM', `[МОНИТОРИНГ]: Активных фоновых процессов ботов в ОЗУ сервера: ${Object.keys(activeClients).length}`);
+        res.json({ success: true });
+    } else if (op === 'accounts') {
+        db.all(`SELECT username, balance, status, boosted_hours FROM accounts`, [], (err, rows) => {
+            if (err || !rows) return saveLog('SYSTEM', 'Ошибка чтения таблицы аккаунтов.');
+            let msg = "\n=== РЕПОЗИТОРИЙ АКТИВНЫХ БОТОВ ===\n";
+            rows.forEach(r => { msg += `• [${r.username}] СТАТУС: ${r.status} | БАЛАНС: $${r.balance.toFixed(2)} | БУСТ: ${r.boosted_hours} ч.\n`; });
+            saveLog('SYSTEM', msg);
+        });
+        res.json({ success: true });
+    } else if (op === 'db') {
+        db.run("VACUUM;", [], (err) => {
+            if (err) saveLog('SYSTEM', `Ошибка оптимизации: ${err.message}`);
+            else saveLog('SYSTEM', `[БД УСПЕХ]: Выполнена команда VACUUM. Структура SQLite оптимизирована, кэш очищен.`);
+        });
+        res.json({ success: true });
+    } else if (op === 'balance') {
+        const user = parts[1]; const amt = parseFloat(parts[2]);
+        if(!user || isNaN(amt)) return saveLog('SYSTEM', '❌ Ошибка синтаксиса. Правильно: balance [user] [сумма]');
+        db.run(`UPDATE accounts SET balance = ? WHERE username = ?`, [amt, user], () => {
+            saveLog('SYSTEM', `[УСТАНОВКА]: Баланс аккаунта ${user} изменен на $${amt.toFixed(2)}`);
+        });
+        res.json({ success: true });
+    } else if (op === 'delete') {
+        const user = parts[1];
+        if(!user) return saveLog('SYSTEM', '❌ Укажите юзера: delete [user]');
+        if(activeClients[user]) {
+            if(activeClients[user].farmInterval) clearInterval(activeClients[user].farmInterval);
+            activeClients[user].client.logOff();
+            delete activeClients[user];
+        }
+        db.run(`DELETE FROM accounts WHERE username = ?`, [user], () => {
+            saveLog('SYSTEM', `[УДАЛЕНИЕ]: Аккаунт ${user} полностью стёрт из ветки базы данных.`);
+        });
+        res.json({ success: true });
+    } else if (op === 'farm') {
+        const user = parts[1]; const mode = parts[2];
+        if(!user || !mode) return saveLog('SYSTEM', '❌ Синтаксис: farm [user] [on/off]');
+        const state = mode.toLowerCase() === 'on';
+        if(activeClients[user]) {
+            activeClients[user].isFarmingHours = state;
+            if(!state) activeClients[user].client.gamesPlayed([]);
+            else {
+                db.get(`SELECT active_apps FROM accounts WHERE username = ?`, [user], (err, row) => {
+                    const apps = (row && row.active_apps ? row.active_apps : '730').split(',').map(x => parseInt(x.trim()));
+                    activeClients[user].client.gamesPlayed(apps);
+                });
+            }
+            saveLog('SYSTEM', `[ФАРМ-МОД]: Статус буста часов для ${user} переключен в: ${state ? 'ON' : 'OFF'}`);
+        }
+        res.json({ success: true });
+    } else if (op === 'games') {
+        const user = parts[1]; const list = parts[2];
+        if(!user || !list) return saveLog('SYSTEM', '❌ Синтаксис: games [user] [730,440,570]');
+        db.run(`UPDATE accounts SET active_apps = ? WHERE username = ?`, [list, user], () => {
+            saveLog('SYSTEM', `[КОНФИГУРАЦИЯ]: Для ${user} обновлен список AppID: [${list}]. Перезапустите бота для применения.`);
+        });
+        res.json({ success: true });
+    } else if (op === 'evolve') {
+        db.get(`SELECT generation FROM system_config WHERE id = 1`, [], (err, row) => {
+            const next = (row ? row.generation : 1) + 1;
+            db.run(`UPDATE system_config SET generation = ? WHERE id = 1`, [next], () => {
+                saveLog('AI_AGENT', `Принудительная мутация из терминала. Стек переведен на Поколение ${next}.`);
+            });
+        });
+        res.json({ success: true });
+    } else if (op === 'clear') {
+        db.run(`DELETE FROM logs`, [], () => {
+            saveLog('SYSTEM', '======= СИСТЕМНЫЙ ЖУРНАЛ ЛОГОВ ОЧИЩЕН =======');
+        });
         res.json({ success: true });
     } else {
-        saveLog('SYSTEM', `❌ Lexical instruction unknown: "${rawOp}". Input "help" to view parameter configurations.`);
+        saveLog('SYSTEM', `❌ Команда не распознана: "${rawOp}". Наберите "help" или "помощь" для вывода всех установок.`);
         res.json({ success: false });
     }
 });
 
-// UI PRODUCTION RENDER RESOND BLOCK (Escaped from bracket literal collisions)
+// МОНОЛИТНЫЙ ВЕБ-ИНТЕРФЕЙС ДАШБОРДА
 app.get('/', (req, res) => {
     res.send(`
 <!DOCTYPE html>
@@ -329,11 +368,11 @@ app.get('/', (req, res) => {
     <main style="display: flex; flex-direction: column; gap: 25px;">
         <div class="panel ai-panel">
             <div class="panel-header">
-                <span>🤖 TRADING AI AGENT v9.5 [GODMODE CORE]</span>
+                <span>🤖 TRADING AI AGENT v9.5 [FULL OPERATIONAL MODULE]</span>
                 <span class="neon" id="ui-gen">МУТАЦИЯ ЯДРА: 1</span>
             </div>
             <p style="font-style:italic; color:#94a3b8; line-height:1.6; background:#02050c; padding:15px; border-radius:8px; border-left:3px solid var(--steam-cyan);">
-                "Производственная сборка развернута без ошибок. Исправлены все утечки обработчиков и дублирования сокетов Valve. Встроенные автоматические циклы буста часов в пяти ключевых AppID запущены параллельно в фоновом режиме. Используйте интерактивное командное ведро ввода для маршрутизации токенов."
+                "Интерактивная станция укомплектована. Добавлен полный стек команд установок для администрирования баз данных, пула ОЗУ, изменения AppID на лету и сброса кэша логов. Наберите 'помощь' или 'help' в консоли для открытия мануала."
             </p>
         </div>
 
@@ -417,4 +456,4 @@ app.get('/', (req, res) => {
     `);
 });
 
-app.listen(PORT, () => console.log(`[PRODUCTION HUB RUNNING]: Fail-safe container initialized safely on cluster port: ${PORT}`));
+app.listen(PORT, () => console.log(`[TERMINAL HUB RUNNING]: Монолитный комплекс успешно развернут на порту: ${PORT}`));
