@@ -1,8 +1,9 @@
 {
-  "name": "steam-autonomous-supreme-suite",
-  "version": "5.0.0",
-  "description": "Resilient Monolithic Multi-Account Steam Farm & Trading Core",
+  "name": "steam-autonomous-godmode-suite",
+  "version": "4.0.0",
+  "description": "Enterprise-grade monolithic Steam multi-account farm and trading engine",
   "main": "server.js",
+  "license": "MIT",
   "scripts": {
     "start": "node server.js"
   },
