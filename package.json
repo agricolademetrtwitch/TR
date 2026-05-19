@@ -1,7 +1,7 @@
 {
-  "name": "steam-autonomous-godmode-suite",
+  "name": "steam-autonomous-supreme-suite",
   "version": "5.0.0",
-  "description": "Enterprise monolithic Steam multi-account farm engine",
+  "description": "RESILIENT STEAM PRODUCTION ENGINE",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -12,7 +12,7 @@
     "steam-totp": "latest",
     "steamcommunity": "latest",
     "steam-tradeoffer-manager": "latest",
-    "sqlite3": "^5.1.7"
+    "better-sqlite3": "^11.0.0"
   },
   "engines": {
     "node": ">=18.0.0"
