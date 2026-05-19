@@ -1,11 +1,12 @@
 /**
- * 🤖 STEAM AUTONOMOUS HUB v2026.TURBO-BOOSTER
- * Модули: База Данных, Пул ASF, SAM Picker, DLC Анлокер, Трейд-Менеджер, ИИ-Терминал, Интеграция steam_godmode_suite_2026.html
- * Оптимизация: Турбо-Бустер сессий (Keep-Alive), Защита от утечек ОЗУ
+ * 🤖 STEAM AUTONOMOUS HUB v2026.GODMODE-HTML-INTEGRATED
+ * Архитектура: Монолитное ядро с нативной поддержкой steam_godmode_suite_2026.html
+ * Исправление: Реальный пересчет игровых часов + Сигнатурный трекинг зачисления карточек
  */
 
 const express = require('express');
 const path = require('path');
+const fs = require('fs');
 const https = require('https');
 const sqlite3 = require('sqlite3').verbose();
 const SteamUser = require('steam-user');
@@ -44,7 +45,7 @@ let guardCallbacks = {};
 function saveLog(username, message) {
     const timestamp = new Date().toLocaleTimeString();
     const cleanMsg = String(message).replace(/['"]/g, "`");
-    console.log(`[${username || 'SYSTEM'}]: ${cleanMsg}`);
+    console.log(`[\({username \vert{}\vert{} 'SYSTEM'}]:\){cleanMsg}`);
     db.run(`INSERT INTO logs (username, timestamp, message) VALUES (?, ?, ?)`, [username || 'SYSTEM', timestamp, cleanMsg]);
 }
 
@@ -52,7 +53,6 @@ function launchAccountBot(username, password, sharedSecret, proxyStr) {
     if (activeClients[username]) {
         try {
             if (activeClients[username].farmInterval) clearInterval(activeClients[username].farmInterval);
-            if (activeClients[username].keepAliveInterval) clearInterval(activeClients[username].keepAliveInterval);
             activeClients[username].client.logOff();
             activeClients[username].client.removeAllListeners();
         } catch (e) {}
@@ -64,9 +64,19 @@ function launchAccountBot(username, password, sharedSecret, proxyStr) {
 
     const community = new SteamCommunity();
     const manager = new TradeOfferManager({ steam: client, community: community, language: 'ru' });
-    const defaultApps =; 
+    const defaultApps = [730, 440, 570, 10, 304930];
 
-    activeClients[username] = { client, community, manager, farmInterval: null, keepAliveInterval: null, apps: defaultApps, isFarming: true };
+    // Добавляем sessionStartTime для точного вычисления игровых часов
+    activeClients[username] = { 
+        client, 
+        community, 
+        manager, 
+        farmInterval: null, 
+        apps: defaultApps, 
+        isFarming: true,
+        sessionStartTime: null,
+        baseHours: 0
+    };
 
     let code2FA = "";
     if (sharedSecret && sharedSecret.trim().length > 3) {
@@ -78,7 +88,7 @@ function launchAccountBot(username, password, sharedSecret, proxyStr) {
     client.on('steamGuard', (domain, callback) => {
         guardCallbacks[username] = callback;
         db.run(`UPDATE accounts SET status = 'CONNECTING' WHERE username = ?`, [username]);
-        saveLog(username, `[GUARD ЗАПРОС]: Введите проверочный код в терминал: guard ${username} КОД`);
+        saveLog(username, `[GUARD ЗАПРОС]: Введите проверочный код в терминал: guard \${username} КОД`);
     });
 
     client.on('loggedOn', () => {
@@ -88,36 +98,54 @@ function launchAccountBot(username, password, sharedSecret, proxyStr) {
         
         client.setPersona(SteamUser.EPersonaState.Online);
         client.gamesPlayed(activeClients[username].apps); 
-        saveLog(username, `[ФАРМ КАРТОЧЕК / БУСТ ЧАСОВ]: Успешный старт для AppID: ${activeClients[username].apps.join(', ')}`);
+        saveLog(username, `[ФАРМ КАРТОЧЕК / БУСТ ЧАСОВ]: Запущены AppID: \${activeClients[username].apps.join(', ')}`);
         
-        activeClients[username].farmInterval = setInterval(() => {
-            if (activeClients[username].isFarming) {
-                db.run(`UPDATE accounts SET boosted_hours = boosted_hours + 1 WHERE username = ?`, [username]);
+        // ФИКС ЧАСОВ: Подгружаем текущие сохраненные часы как базу и ставим штамп времени старта
+        db.get(`SELECT boosted_hours FROM accounts WHERE username = ?`, [username], (err, row) => {
+            if (!err && row) {
+                activeClients[username].baseHours = row.boosted_hours || 0;
             }
-        }, 3600000);
+            activeClients[username].sessionStartTime = Date.now();
+        });
 
-        // ТУРБО-БУСТЕР: Пакетный Keep-Alive пинг для защиты от разрыва интернет-сессии хостинга
-        activeClients[username].keepAliveInterval = setInterval(() => {
-            client.setPersona(SteamUser.EPersonaState.Online);
-        }, 120000); // Сигнал каждые 2 минуты
+        // Каждые 30 секунд точечно обновляем аптайм сессии в БД на основе реального дельта-времени
+        if (activeClients[username].farmInterval) clearInterval(activeClients[username].farmInterval);
+        activeClients[username].farmInterval = setInterval(() => {
+            if (activeClients[username].isFarming && activeClients[username].sessionStartTime) {
+                const elapsedMs = Date.now() - activeClients[username].sessionStartTime;
+                const elapsedHours = Math.floor(elapsedMs / 3600000);
+                const totalHours = activeClients[username].baseHours + elapsedHours;
+                
+                db.run(`UPDATE accounts SET boosted_hours = ? WHERE username = ?`, [totalHours, username]);
+            }
+        }, 30000);
     });
 
+    // ФИКС КАРТОЧЕК: Перенос зачисления внутрь колбэка успешного заверешения обмена
     manager.on('newOffer', (offer) => {
         if (offer.itemsToGive.length > 0 && offer.itemsToReceive.length === 0) {
-            saveLog(username, `[ЗАЩИТА]: Скам-трейд подмены №${offer.id} отклонен.`);
+            saveLog(username, `[ЗАЩИТА]: Скам-трейд подмены №\${offer.id} отклонен.`);
             offer.decline(); return;
         }
         if (offer.itemsToGive.length === 0 && offer.itemsToReceive.length > 0) {
-            saveLog(username, `[ДРОП КАРТОЧЕК]: Получены новые предметы обмена. Принятие.`);
-            offer.accept((err) => {
-                if (!err) db.run(`UPDATE accounts SET balance = balance + 0.45, farmed_cards = farmed_cards + 1 WHERE username = ?`, [username]);
+            saveLog(username, `[ДРОП КАРТОЧЕК]: Обнаружен входящий подарок №\${offer.id}. Запуск сверки...`);
+            offer.accept((err, status) => {
+                if (err) {
+                    saveLog(username, `[ОШИБКА STEAM]: Не удалось принять карточки №\({offer.id}:\){err.message}`);
+                    return;
+                }
+                if (status === 'accepted') {
+                    // Только при успешном зачислении обновляем БД
+                    db.run(`UPDATE accounts SET balance = balance + 0.45, farmed_cards = farmed_cards + 1 WHERE username = ?`, [username]);
+                    saveLog(username, `[УСПЕХ]: Трейд №\${offer.id} зафиксирован. +1 к счетчику карточек на сайте.`);
+                }
             });
         }
     });
 
     client.on('error', (err) => {
         db.run(`UPDATE accounts SET status = 'ERROR' WHERE username = ?`, [username]);
-        saveLog(username, `Сбой сокета: ${err.message}`);
+        saveLog(username, `Сбой сокета: \${err.message}`);
     });
 }
 
@@ -130,7 +158,7 @@ app.get('/api/dashboard', (req, res) => {
                     generation: config ? config.generation : 1,
                     taxRate: config ? config.tax_rate : 0.1304,
                     accounts: accs || [],
-                    logs: logRows ? logRows.reverse().map(l => `[${l.username}] [${l.timestamp}] ${l.message}`) : []
+                    logs: logRows ? logRows.reverse().map(l => `[\${l.username}] [\({l.timestamp}]\){l.message}`) : []
                 });
             });
         });
@@ -149,7 +177,7 @@ app.post('/api/account/add', (req, res) => {
     const { username, password, sharedSecret, proxyStr, pass } = req.body;
     if (pass !== MASTER_PASSWORD) return res.status(403).json({ error: "Отказ" });
     db.run(`INSERT OR REPLACE INTO accounts (username, password, shared_secret, proxy_str, status) VALUES (?, ?, ?, ?, 'OFFLINE')`, [username, password, sharedSecret, proxyStr], () => {
-        saveLog('SYSTEM', `Учетная запись успешно внедрена в пул: [${username}]`);
+        saveLog('SYSTEM', `Учетная запись успешно внедрена в пул: [\${username}]`);
         launchAccountBot(username, password, sharedSecret, proxyStr);
         res.json({ success: true });
     });
@@ -160,29 +188,29 @@ app.post('/api/terminal/command', (req, res) => {
     if (pass !== MASTER_PASSWORD) return res.status(403).json({ error: "Отказ" });
 
     const parts = String(command).trim().split(/\s+/);
-    const rawOp = parts.toLowerCase();
+    const rawOp = parts[0].toLowerCase();
     const op = (rawOp === 'код') ? 'guard' : (rawOp === 'помощь') ? 'help' : (rawOp === 'сбор') ? 'collect' : (rawOp === 'анлок') ? 'unlock' : (rawOp === 'dlc') ? 'dlc_unlock' : rawOp;
 
     if (op === 'guard') {
-        const user = parts; const code = parts;
+        const user = parts[1]; const code = parts[2];
         if (guardCallbacks[user]) { guardCallbacks[user](code); saveLog(user, `Код Guard передан в сессию.`); }
         else { saveLog('SYSTEM', 'Нет активных запросов Guard.'); }
         return res.json({ success: true });
     }
     if (op === 'dlc_unlock') {
-        const user = parts; const appIds = parts;
+        const user = parts[1]; const appIds = parts[2];
         if (user && appIds) {
             db.run(`UPDATE accounts SET unlocked_dlcs = ? WHERE username = ?`, [appIds, user], () => {
-                saveLog(user, `[DLC UNLOCKER]: Пакет дополнений активирован для AppIDs: [${appIds}]`);
+                saveLog(user, `[DLC UNLOCKER]: Пакет дополнений активирован для AppIDs: [\${appIds}]`);
             });
         }
         return res.json({ success: true });
     }
     if (op === 'unlock') {
-        const user = parts; const appId = parseInt(parts);
+        const user = parts[1]; const appId = parseInt(parts[2]);
         if (activeClients[user] && !isNaN(appId)) {
-            saveLog(user, `[SAM PICKER]: Инжекция ачивок для AppID ${appId}...`);
-            setTimeout(() => { saveLog(user, `[SAM SUCCESS]: 100% достижений игры ${appId} успешно разблокировано!`); }, 2000);
+            saveLog(user, `[SAM PICKER]: Инжекция ачивок для AppID \${appId}...`);
+            setTimeout(() => { saveLog(user, `[SAM SUCCESS]: 100% достижений игры \${appId} успешно разблокировано!`); }, 2000);
         }
         return res.json({ success: true });
     }
@@ -197,14 +225,15 @@ app.post('/api/terminal/command', (req, res) => {
     res.json({ success: false });
 });
 
-// ИНТЕГРАЦИЯ ШАБЛОНА steam_godmode_suite_2026.html НАПРЯМУЮ В ЯДРО
 app.get('/', (req, res) => {
+    const customHtmlPath = path.join(__dirname, 'steam_godmode_suite_2026.html');
+    if (fs.existsSync(customHtmlPath)) { return res.sendFile(customHtmlPath); }
     res.send(`
 <!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Steam Premium Cyber-Console v7.5 [steam_godmode_suite_2026.html]</title>
+    <title>Steam Premium Cyber-Console v7.5</title>
     <link href="https://googleapis.com" rel="stylesheet">
     <style>
         :root { --bg-deep: #07090e; --cyber-panel: rgba(23, 26, 33, 0.85); --cyber-cyan: #00f0ff; --cyber-green: #00ff87; --cyber-red: #ff3b3b; --steam-blue: #66c0f4; --steam-accent: #2a475e; --glass-border: rgba(255, 255, 255, 0.04); }
@@ -238,9 +267,8 @@ app.get('/', (req, res) => {
     </style>
 </head>
 <body>
-
     <header class="header-bar">
-        <div class="logo">⚙️ STEAM СТАНЦИЯ <span>v7.5 [GODMODE]</span></div>
+        <div class="logo">⚙️ STEAM СТАНЦИЯ <span>v7.5</span></div>
         <nav class="tabs-container">
             <button class="tab-trigger active" onclick="routeTab('pool')">👥 Пул ботов</button>
             <button class="tab-trigger" onclick="routeTab('sam')">🎯 SAM Ачивки</button>
@@ -251,7 +279,6 @@ app.get('/', (req, res) => {
         </nav>
     </header>
 
-    <!-- ВКЛАДКА 1 -->
     <div id="view-pool" class="viewport-wrapper layout-grid active">
         <aside class="panel-card">
             <div class="panel-title">Внедрение Бота (ASF Core)</div>
@@ -267,7 +294,6 @@ app.get('/', (req, res) => {
         </main>
     </div>
 
-    <!-- ВКЛАДКА 2 -->
     <div id="view-sam" class="viewport-wrapper">
         <div class="panel-card" style="max-width: 600px; margin: 0 auto; width:100%;">
             <div class="panel-title">🎯 Разблокировка достижений (SAM)</div>
@@ -277,7 +303,6 @@ app.get('/', (req, res) => {
         </div>
     </div>
 
-    <!-- ВКЛАДКА 3 -->
     <div id="view-trade" class="viewport-wrapper">
         <div class="panel-card" style="max-width: 600px; margin: 0 auto; width:100%;">
             <div class="panel-title">📦 Пересылка предметов (Advanced Trade Manager)</div>
@@ -285,7 +310,6 @@ app.get('/', (req, res) => {
         </div>
     </div>
 
-    <!-- ВКЛАДКА 4 -->
     <div id="view-dlc" class="viewport-wrapper">
         <div class="panel-card" style="max-width: 600px; margin: 0 auto; width:100%;">
             <div class="panel-title">🔑 Модуль DLC Unlocker</div>
@@ -295,19 +319,17 @@ app.get('/', (req, res) => {
         </div>
     </div>
 
-    <!-- ВКЛАДКА 5 -->
     <div id="view-terminal" class="viewport-wrapper">
         <div class="panel-card" style="width:100%;">
             <div class="panel-title">Глобальная Консоль Walftech Engine <span id="generation-tag" style="color:var(--cyber-cyan);">МУТАЦИЯ ЯДРА: 1</span></div>
             <div class="terminal-viewport" id="terminal-target"></div>
             <div class="cmd-line-wrapper">
-                <span style="font-family:'JetBrains Mono'; color:#64748b; font-size:0.9rem; padding-right:10px;">$</span>
+                <span style="font-family:'JetBrains Mono'; color:#64748b; font-size:0.9rem; padding-right:10px;">\$</span>
                 <input type="text" class="cmd-input" id="terminal-input-node" placeholder="Команды: help, guard [user] [код]..." onkeydown="submitCommand(event)">
             </div>
         </div>
     </div>
 
-    <!-- ВКЛАДКА 6 -->
     <div id="view-config" class="viewport-wrapper">
         <div class="panel-card" style="max-width: 600px; margin: 0 auto; width:100%;">
             <div class="panel-title">Шлюзы Безопасности & Ключи</div>
@@ -338,7 +360,7 @@ app.get('/', (req, res) => {
             term.scrollTop = term.scrollHeight;
 
             const grid = document.getElementById('bot-grid-target');
-            grid.innerHTML = data.accounts.map(acc => `
+            grid.innerHTML = data.accounts.map(acc => \`
                 <div class="bot-node \${acc.status}">
                     <div>
                         <div style="font-weight:700; color:#fff; font-size:1.05rem;">\${acc.username}</div>
@@ -350,7 +372,7 @@ app.get('/', (req, res) => {
                         <span style="font-size:0.9rem; font-weight:700; color:var(--cyber-cyan); font-family:'JetBrains Mono';">\$\${acc.balance.toFixed(2)}</span>
                     </div>
                 </div>
-            `).join('');
+            \`).join('');
         } catch(e) {}
     }
 
@@ -392,45 +414,4 @@ app.get('/', (req, res) => {
         await fetch('/api/terminal/command', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ command: 'collect', pass: document.getElementById('master-pass').value })
-        });
-        routeTab('terminal'); syncDataFeed();
-    }
-
-    async function commitConfig() {
-        await fetch('/api/config/set', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                token: document.getElementById('tg-token').value,
-                chatId: document.getElementById('tg-chat').value,
-                mainId: document.getElementById('main-id').value,
-                pass: document.getElementById('master-pass').value
-            })
-        });
-        syncDataFeed();
-    }
-
-    async function submitCommand(e) {
-        if (e.key === 'Enter') {
-            const inputNode = document.getElementById('terminal-input-node');
-            const cmd = inputNode.value; if(!cmd.trim()) return;
-            inputNode.value = '';
-            await fetch('/api/terminal/command', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ command: cmd, pass: document.getElementById('master-pass').value })
-            });
-            syncDataFeed();
-        }
-    }
-
-    setInterval(syncDataFeed, 1500);
-    window.onload = syncDataFeed;
-</script>
-</body>
-</html>
-    `);
-});
-
-app.listen(PORT, () => console.log(`[SERVER ONLINE]: Монолит запущен на порту: ${PORT}`));
+            
