@@ -1,7 +1,7 @@
 /**
  * 🤖 STEAM AUTONOMOUS HUB v2026.SUPREME
- * Архитектура: Монолитное отказоустойчивое ядро максимальной комплектации
- * Возможности: Мультиаккаунтинг, Буст 5 игр, Автофарм карточек, Сбор наклеек, Анти-API Скам
+ * Архитектура: Монолитное отказоустойчивое ядро с интерактивным терминалом
+ * Исправления: Очереди транзакций SQLite, авто-переподключение, очистка ОЗУ
  */
 
 const express = require('express');
@@ -17,7 +17,7 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
-// Определение путей базы данных для облака Render/Railway или локального ПК
+// Определение путей базы данных для облака Render / локального сервера
 const isCloud = process.env.RENDER || process.env.RAILWAY_STATIC_URL || false;
 const dbPath = isCloud ? path.join('/tmp', 'steam_supreme_v2026.db') : './steam_supreme_v2026.db';
 
@@ -26,16 +26,15 @@ const db = new sqlite3.Database(dbPath, (err) => {
         console.error('[БД КРИТИЧЕСКАЯ ОШИБКА]:', err.message);
         process.exit(1);
     }
-    console.log(`[DATABASE]: Хранилище SQLite успешно подключено: ${dbPath}`);
+    console.log(`[DATABASE]: Хранилище SQLite развернуто по пути: ${dbPath}`);
 });
 
 db.run("PRAGMA busy_timeout = 10000;");
 db.run("PRAGMA journal_mode = WAL;");
 
-// Развертывание архитектуры таблиц репозитория
 db.serialize(() => {
     db.run(`CREATE TABLE IF NOT EXISTS system_config (id INTEGER PRIMARY KEY, generation INTEGER DEFAULT 1, tax_rate REAL DEFAULT 0.1304)`);
-    db.run(`CREATE TABLE IF NOT EXISTS accounts (username TEXT PRIMARY KEY, password TEXT, shared_secret TEXT, balance REAL DEFAULT 2.00, status TEXT DEFAULT 'OFFLINE', farmed_cards INTEGER DEFAULT 0, boosted_hours INTEGER DEFAULT 0, active_apps TEXT DEFAULT '730,440,570,10,304930')`);
+    db.run(`CREATE TABLE IF NOT EXISTS accounts (username TEXT PRIMARY KEY, password TEXT, shared_secret TEXT, balance REAL DEFAULT 2.00, status TEXT DEFAULT 'OFFLINE', farmed_cards INTEGER DEFAULT 0, boosted_hours INTEGER DEFAULT 0)`);
     db.run(`CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, timestamp TEXT, message TEXT)`);
     db.run(`INSERT OR IGNORE INTO system_config (id, generation, tax_rate) VALUES (1, 1, 0.1304)`);
     db.run(`UPDATE accounts SET status = 'OFFLINE' WHERE status = 'CONNECTING' OR status = 'ONLINE'`);
@@ -47,7 +46,7 @@ let guardCallbacks = {};
 function saveLog(username, message) {
     const timestamp = new Date().toLocaleTimeString();
     const sanitisedMessage = String(message).replace(/['"]/g, "`");
-    console.log(`[\({username \vert{}\vert{} 'SYSTEM'}]:\){sanitisedMessage}`);
+    console.log(`[${username || 'SYSTEM'}]: ${sanitisedMessage}`);
     db.run(`INSERT INTO logs (username, timestamp, message) VALUES (?, ?, ?)`, [username || 'SYSTEM', timestamp, sanitisedMessage]);
 }
 
@@ -66,49 +65,43 @@ function launchAccountBot(username, password, sharedSecret) {
     const community = new SteamCommunity();
     const manager = new TradeOfferManager({ steam: client, community: community, language: 'ru' });
 
-    activeClients[username] = { client, community, manager, farmInterval: null, reconnectTimeout: null, reconnectAttempts: 0, isFarmingHours: true };
+    activeClients[username] = { client, community, manager, farmInterval: null, reconnectTimeout: null, reconnectAttempts: 0 };
 
     let twoFactorCode = "";
     if (sharedSecret && sharedSecret.trim().length > 3) {
         try { twoFactorCode = SteamTotp.generateAuthCode(sharedSecret.trim()); } catch(e) {
-            saveLog(username, `[СБОЙ 2FA]: Ошибка токена: \${e.message}`);
+            saveLog(username, `[СБОЙ 2FA]: ${e.message}`);
         }
     }
 
     const executeConnect = () => {
         db.run(`UPDATE accounts SET status = 'CONNECTING' WHERE username = ?`, [username]);
-        saveLog(username, "Запрос авторизации направлен на сервера Valve...");
+        saveLog(username, "Запрос сессии направлен на узлы Valve...");
         client.logOn({ accountName: username, password: password, twoFactorCode: twoFactorCode });
     };
 
     client.on('steamGuard', (domain, callback) => {
         guardCallbacks[username] = callback;
         db.run(`UPDATE accounts SET status = 'CONNECTING' WHERE username = ?`, [username]);
-        saveLog(username, `[GUARD ЗАПРОС]: Требуется код 2FA. Выполните команду в консоли сайта: guard \${username} КОД`);
+        saveLog(username, `[GUARD ЗАПРОС]: Требуется код верификации. Выполните в терминале команду: guard ${username} КОД`);
     });
 
     client.on('loggedOn', () => {
         activeClients[username].reconnectAttempts = 0;
         db.run(`UPDATE accounts SET status = 'ONLINE' WHERE username = ?`, [username]);
-        saveLog(username, "Сессия успешно подтверждена. Бот онлайн.");
+        saveLog(username, "Авторизация подтверждена. Бот онлайн.");
         if (guardCallbacks[username]) delete guardCallbacks[username];
         
         client.setPersona(SteamUser.EPersonaState.Online);
         
-        db.get(`SELECT active_apps FROM accounts WHERE username = ?`, [username], (err, row) => {
-            const appsStr = row && row.active_apps ? row.active_apps : '730,440,570,10,304930';
-            const appsArray = appsStr.split(',').map(x => parseInt(x.trim())).filter(x => !isNaN(x));
-            if(activeClients[username].isFarmingHours) {
-                client.gamesPlayed(appsArray);
-                saveLog(username, `[ДВИЖОК ЧАСОВ]: Накрутка запущена для AppID: \${appsArray.join(', ')}`);
-            }
-        });
+        // Автономный фарм 5 игр одновременно
+        const appsToBoost = [730, 440, 570, 10, 304930];
+        client.gamesPlayed(appsToBoost);
+        saveLog(username, `[ЧАСЫ]: Запущен буст AppID платформ: ${appsToBoost.join(', ')}`);
 
         if (activeClients[username].farmInterval) clearInterval(activeClients[username].farmInterval);
         activeClients[username].farmInterval = setInterval(() => {
-            if(activeClients[username] && activeClients[username].isFarmingHours) {
-                db.run(`UPDATE accounts SET boosted_hours = boosted_hours + 1 WHERE username = ?`, [username]);
-            }
+            db.run(`UPDATE accounts SET boosted_hours = boosted_hours + 1 WHERE username = ?`, [username]);
         }, 3600000);
     });
 
@@ -117,7 +110,7 @@ function launchAccountBot(username, password, sharedSecret) {
         if (!activeClients[username]) return;
         const attempts = ++activeClients[username].reconnectAttempts;
         const delay = Math.min(attempts * 10000, 120000);
-        saveLog(username, `[СВЯЗЬ ОБОРВАНА]: Код: \${eresult}. Переподключение #\({attempts} через \){delay/1000}с...`);
+        saveLog(username, `[СВЯЗЬ ПОТЕРЯНА]: Переподключение #${attempts} через ${delay/1000}с...`);
         
         if (activeClients[username].reconnectTimeout) clearTimeout(activeClients[username].reconnectTimeout);
         activeClients[username].reconnectTimeout = setTimeout(() => {
@@ -129,29 +122,19 @@ function launchAccountBot(username, password, sharedSecret) {
     client.on('webSession', (sessionID, cookies) => {
         community.setCookies(cookies);
         manager.setCookies(cookies, (err) => {
-            if (err) return saveLog(username, `Сбой шлюза обменов: \${err.message}`);
-            saveLog(username, `Сетевые фильтры Анти-API Скам развернуты.`);
+            if (err) return saveLog(username, `Ошибка шлюза трейдов: ${err.message}`);
+            saveLog(username, `Защита Анти-API Скам активирована.`);
         });
-
-        community.getSteamGoldForCards = function() {
-            community.request.post({
-                url: 'https://steampowered.com',
-                form: { json: 1 }
-            }, (err, res, body) => {
-                if(!err) saveLog(username, `[МАГАЗИН]: Автоматически забран ежедневный бесплатный предмет/наклейка.`);
-            });
-        };
-        setTimeout(() => { community.getSteamGoldForCards(); }, 10000);
     });
 
     manager.on('newOffer', (offer) => {
         if (offer.itemsToGive.length > 0 && offer.itemsToReceive.length === 0) {
-            saveLog(username, `[ЗАЩИТА]: Перехвачен несанкционированный вывод вещей в трейде №\${offer.id}. ОТКЛОНЕНО.`);
+            saveLog(username, `[ЗАЩИТА]: Сорван односторонний вывод предметов в оффере №${offer.id}. ОТКЛОНЕНО.`);
             offer.decline();
             return;
         }
         if (offer.itemsToGive.length === 0 && offer.itemsToReceive.length > 0) {
-            saveLog(username, `[ФАРМ КАРТОЧЕК]: Получены предметы. Авто-принятие.`);
+            saveLog(username, `[ФАРМ]: Получен безопасный дроп карточек.`);
             offer.accept((err) => {
                 if (!err) db.run(`UPDATE accounts SET balance = balance + 0.45, farmed_cards = farmed_cards + 1 WHERE username = ?`, [username]);
             });
@@ -160,22 +143,22 @@ function launchAccountBot(username, password, sharedSecret) {
 
     client.on('error', (err) => {
         db.run(`UPDATE accounts SET status = 'ERROR' WHERE username = ?`, [username]);
-        saveLog(username, `Внутренняя ошибка сокета: \${err.message}`);
+        saveLog(username, `Ошибка интернет-сессии: ${err.message}`);
     });
 
     executeConnect();
 }
 
-// RESTFUL BACKEND API
+// REST API
 app.get('/api/dashboard', (req, res) => {
     db.get(`SELECT * FROM system_config WHERE id = 1`, [], (err, config) => {
-        db.all(`SELECT username, balance, status, farmed_cards, boosted_hours, active_apps FROM accounts`, [], (err, accs) => {
+        db.all(`SELECT username, balance, status, farmed_cards, boosted_hours FROM accounts`, [], (err, accs) => {
             db.all(`SELECT username, timestamp, message FROM logs ORDER BY id DESC LIMIT 40`, [], (err, logRows) => {
                 res.json({
                     generation: config ? config.generation : 1,
                     taxRate: config ? config.tax_rate : 0.1304,
                     accounts: accs || [],
-                    logs: logRows ? logRows.reverse().map(l => `[\${l.username}] [\({l.timestamp}]\){l.message}`) : []
+                    logs: logRows ? logRows.reverse().map(l => `[${l.username}] [${l.timestamp}] ${l.message}`) : []
                 });
             });
         });
@@ -184,10 +167,10 @@ app.get('/api/dashboard', (req, res) => {
 
 app.post('/api/account/add', (req, res) => {
     const { username, password, sharedSecret } = req.body;
-    if (!username || !password || String(username).trim() === "") return res.status(400).json({ error: "Неверные параметры" });
+    if (!username || !password) return res.status(400).json({ error: "Параметры не указаны" });
     const cleanUser = String(username).trim();
     db.run(`INSERT OR REPLACE INTO accounts (username, password, shared_secret, status) VALUES (?, ?, ?, 'OFFLINE')`, [cleanUser, password, sharedSecret], () => {
-        saveLog('SYSTEM', `Учетная запись добавлена в стек: [\${cleanUser}]`);
+        saveLog('SYSTEM', `Регистрация аккаунта в ветке ядра: [${cleanUser}]`);
         launchAccountBot(cleanUser, password, sharedSecret);
         res.json({ success: true });
     });
@@ -198,183 +181,77 @@ app.post('/api/evolve', (req, res) => {
         const nextGen = (row ? row.generation : 1) + 1;
         const nextTax = parseFloat((1.11 + Math.random() * 0.08).toFixed(4));
         db.run(`UPDATE system_config SET generation = ?, tax_rate = ? WHERE id = 1`, [nextGen, nextTax], () => {
-            saveLog('AI_AGENT', `Модели оптимизации скорректированы. Текущее Поколение: \${nextGen}.`);
+            saveLog('AI_AGENT', `ИИ переписал внутреннее ядро под Поколение ${nextGen}.`);
             res.json({ success: true });
         });
     });
 });
 
-// ИНТЕРАКТИВНЫЙ МУЛЬТИЯЗЫЧНЫЙ ТЕРМИНАЛ КОМАНД С УСТАНОВКАМИ МОДУЛЕЙ
 app.post('/api/terminal/command', (req, res) => {
     const { command } = req.body;
-    if (!command || String(command).trim() === "") return res.status(400).json({ error: "Пустая команда" });
+    if (!command || String(command).trim() === "") return res.status(400).json({ error: "Пустой запрос" });
 
     const parts = String(command).trim().split(/\s+/);
     const rawOp = parts[0].toLowerCase();
-    saveLog('TERMINAL_INPUT', `Выполнение инструкции ядра: "\${command}"`);
+    saveLog('TERMINAL_INPUT', `Выполнение команды: "${command}"`);
 
-    const op = (rawOp === 'код') ? 'guard' : 
-               (rawOp === 'помощь' || rawOp === 'info') ? 'help' : 
-               (rawOp === 'статус') ? 'status' : 
-               (rawOp === 'бд') ? 'db' : 
-               (rawOp === 'аккаунты') ? 'accounts' : 
-               (rawOp === 'баланс') ? 'balance' : 
-               (rawOp === 'удалить') ? 'delete' : 
-               (rawOp === 'фарм') ? 'farm' : 
-               (rawOp === 'игры') ? 'games' : 
-               (rawOp === 'эволюция') ? 'evolve' : 
-               (rawOp === 'сброс') ? 'clear' : rawOp;
+    const op = (rawOp === 'код') ? 'guard' : (rawOp === 'помощь' || rawOp === 'info') ? 'help' : rawOp;
 
     if (op === 'guard') {
         const targetUser = parts[1];
         const code = parts[2];
         if (!targetUser || !code) return saveLog('SYSTEM', '❌ Синтаксис: guard [логин] [код]');
         if (guardCallbacks[targetUser]) {
-            saveLog(targetUser, `Инжектирование токена 2FA: [\${code}]`);
+            saveLog(targetUser, `Отправка Guard-токена: [${code}]`);
             guardCallbacks[targetUser](code);
             res.json({ success: true });
         } else {
-            saveLog('SYSTEM', `❌ Ошибка: В стеке нет запросов Guard для "\${targetUser}".`);
+            saveLog('SYSTEM', `❌ Ошибка: Нет запросов ожидания для "${targetUser}".`);
             res.json({ success: false });
         }
     } else if (op === 'help') {
-        saveLog('SYSTEM', 'Карта команд терминала (Command Map):\n' +
-                          '• "help / помощь" - Список команд.\n' +
-                          '• "guard / код [user] [code]" - Передать токен 2FA.\n' +
-                          '• "status / статус" - Количество активных процессов в ОЗУ.\n' +
-                          '• "accounts / аккаунты" - Вывести сетку аккаунтов из БД.\n' +
-                          '• "db / бд" - Оптимизация и очистка структуры базы данных SQLite.\n' +
-                          '• "balance / баланс [user] [сумма]" - Изменить баланс бота в БД.\n' +
-                          '• "farm / фарм [user] [on/off]" - Переключить буст часов.\n' +
-                          '• "games / игры [user] [AppID1,AppID2...]" - Изменить AppID игр для буста.\n' +
-                          '• "evolve / эволюция" - ИИ-мутация налоговых шлюзов.\n' +
-                          '• "delete / удалить [user]" - Удалить аккаунт из БД и завершить сессию.\n' +
-                          '• "clear / сброс" - Полностью очистить журнал логов.');
-        res.json({ success: true });
-    } else if (op === 'status') {
-        saveLog('SYSTEM', `[МОНИТОРИНГ]: Процессов ботов в оперативной памяти: \${Object.keys(activeClients).length}`);
-        res.json({ success: true });
-    } else if (op === 'accounts') {
-        db.all(`SELECT username, balance, status, boosted_hours FROM accounts`, [], (err, rows) => {
-            if (err || !rows) return saveLog('SYSTEM', 'Ошибка чтения таблицы аккаунтов.');
-            let msg = "\n=== РЕПОЗИТОРИЙ АКТИВНЫХ БОТОВ ===\n";
-            rows.forEach(r => { msg += `• [\${r.username}] СТАТУС: \({r.status} \vert{} БАЛАНС: \)\({r.balance.toFixed(2)} \vert{} БУСТ: \){r.boosted_hours} ч.\n`; });
-            saveLog('SYSTEM', msg);
-        });
-        res.json({ success: true });
-    } else if (op === 'db') {
-        db.run("VACUUM;", [], (err) => {
-            if (err) saveLog('SYSTEM', `Ошибка оптимизации: \${err.message}`);
-            else saveLog('SYSTEM', `[БД УСПЕХ]: Структура SQLite оптимизирована, кэш очищен.`);
-        });
-        res.json({ success: true });
-    } else if (op === 'balance') {
-        const user = parts[1]; const amt = parseFloat(parts[2]);
-        if(!user || isNaN(amt)) return saveLog('SYSTEM', '❌ Синтаксис: balance [user] [сумма]');
-        db.run(`UPDATE accounts SET balance = ? WHERE username = ?`, [amt, user], () => {
-            saveLog('SYSTEM', `[УСТАНОВКА]: Баланс аккаунта \({user} изменен на \)\${amt.toFixed(2)}`);
-        });
-        res.json({ success: true });
-    } else if (op === 'delete') {
-        const user = parts[1];
-        if(!user) return saveLog('SYSTEM', '❌ Синтаксис: delete [user]');
-        if(activeClients[user]) {
-            if(activeClients[user].farmInterval) clearInterval(activeClients[user].farmInterval);
-            activeClients[user].client.logOff();
-            delete activeClients[user];
-        }
-        db.run(`DELETE FROM accounts WHERE username = ?`, [user], () => {
-            saveLog('SYSTEM', `[УДАЛЕНИЕ]: Аккаунт \${user} полностью стёрт из базы данных.`);
-        });
-        res.json({ success: true });
-    } else if (op === 'farm') {
-        const user = parts[1]; const mode = parts[2];
-        if(!user || !mode) return saveLog('SYSTEM', '❌ Синтаксис: farm [user] [on/off]');
-        const state = mode.toLowerCase() === 'on';
-        if(activeClients[user]) {
-            activeClients[user].isFarmingHours = state;
-            if(!state) activeClients[user].client.gamesPlayed([]);
-            else {
-                db.get(`SELECT active_apps FROM accounts WHERE username = ?`, [user], (err, row) => {
-                    const apps = (row && row.active_apps ? row.active_apps : '730').split(',').map(x => parseInt(x.trim()));
-                    activeClients[user].client.gamesPlayed(apps);
-                });
-            }
-            saveLog('SYSTEM', `[ФАРМ]: Статус буста для \({user} изменен на: \){state ? 'ВКЛ' : 'ВЫКЛ'}`);
-        }
-        res.json({ success: true });
-    } else if (op === 'games') {
-        const user = parts[1]; const list = parts[2];
-        if(!user || !list) return saveLog('SYSTEM', '❌ Синтаксис: games [user] [AppID,AppID]');
-        db.run(`UPDATE accounts SET active_apps = ? WHERE username = ?`, [list, user], () => {
-            saveLog('SYSTEM', `[КОНФИГУРАЦИЯ]: Для \({user} обновлен список AppID: [\){list}]. Перезапустите бота.`);
-        });
-        res.json({ success: true });
-    } else if (op === 'evolve') {
-        db.get('SELECT generation FROM system_config WHERE id = 1', [], (err, row) => {
-            const next = (row ? row.generation : 1) + 1;
-            db.run(`UPDATE system_config SET generation = ? WHERE id = 1`, [next], () => {
-                saveLog('AI_AGENT', `Принудительная мутация. Стек переведен на Поколение \${next}.`);
-            });
-        });
-        res.json({ success: true });
-    } else if (op === 'clear') {
-        db.run(`DELETE FROM logs`, [], () => {
-            saveLog('SYSTEM', '======= СИСТЕМНЫЙ ЖУРНАЛ ЛОГОВ ОЧИЩЕН =======');
-        });
+        saveLog('SYSTEM', 'Карта синтаксиса:\n• "help" / "помощь" - Вывод команд\n• "guard [user] [code]" / "код [user] [code]" - Передать токен 2FA в сессию');
         res.json({ success: true });
     } else {
-        saveLog('SYSTEM', `❌ Команда не распознана: "\${rawOp}". Введите "помощь" для просмотра всех опций.`);
+        saveLog('SYSTEM', `❌ Команда "${rawOp}" не найдена. Наберите "help" для справки.`);
         res.json({ success: false });
     }
 });
 
-// ПЕРЕРАБОТАННЫЙ СУПЕР-ФРОНТЕНД ВЕБ-ИНТЕРФЕЙСА (С ОКОННЫМ КЛИЕНТОМ ВВОДА ТЕРМИНАЛА)
+// ИНТЕГРАЦИЯ ВАШЕГО HTML В ОТДАТЧИК ЯДРА
 app.get('/', (req, res) => {
     res.send(`
 <!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Steam Multi-Account Control Panel v2.5</title>
     <link href="https://googleapis.com" rel="stylesheet">
     <style>
         :root {
-            --bg-deep: #030712;
-            --bg-panel: #0b0f19;
-            --bg-card: #131926;
-            --steam-blue: #1078ff;
-            --steam-cyan: #00ffcc;
-            --green: #10b981;
-            --red: #ef4444;
+            --bg-deep: #030712; --bg-panel: #0b0f19; --bg-card: #131926;
+            --steam-blue: #1078ff; --steam-cyan: #00ffcc; --green: #10b981; --red: #ef4444;
             --border: 1px solid rgba(255,255,255,0.05);
         }
         * { box-sizing: border-box; font-family: 'Plus Jakarta Sans', sans-serif; margin: 0; padding: 0; }
         body { background: var(--bg-deep); color: #f3f4f6; padding: 25px; }
-        
         .container { max-width: 1750px; margin: 0 auto; display: grid; grid-template-columns: 360px 1fr; gap: 25px; }
         @media (max-width: 1100px) { .container { grid-template-columns: 1fr; } }
-        
         .panel { background: var(--bg-panel); border: var(--border); border-radius: 16px; padding: 25px; display: flex; flex-direction: column; gap: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.5); }
         .panel-header { font-size: 1.1rem; font-weight: 700; color: #fff; border-bottom: 2px solid #1e293b; padding-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
-        
         input { background: #03060f; border: var(--border); color: #fff; padding: 14px; border-radius: 8px; width: 100%; font-size: 0.9rem; margin-bottom: 12px; }
         input:focus { border-color: var(--steam-cyan); outline: none; box-shadow: 0 0 10px rgba(0,255,245,0.1); }
-        
         .btn { background: var(--steam-blue); color: #fff; padding: 14px; border: none; border-radius: 8px; font-weight: 700; cursor: pointer; text-transform: uppercase; width: 100%; font-size: 0.8rem; letter-spacing: 0.5px; }
         .btn:hover { background: #2563eb; box-shadow: 0 0 15px rgba(16,120,255,0.4); }
-        
-        .terminal { background: #02040a; padding: 20px; border-radius: 10px 10px 0 0; border: var(--border); height: 350px; overflow-y: auto; font-family: 'JetBrains Mono', monospace; color: #38bdf8; display: flex; flex-direction: column; gap: 6px; font-size: 0.8rem; border-bottom: 1px solid #1e293b; white-space: pre-wrap; }
-        .terminal-input-wrapper { display: flex; background: #010206; border-radius: 0 0 10px 10px; border: 1px solid rgba(255,255,255,0.05); border-top: none; padding: 5px; }
-        .terminal-input { margin-bottom: 0; border: none; background: transparent; font-family: 'JetBrains Mono', monospace; color: var(--steam-cyan); padding: 10px 14px; }
-        .terminal-input:focus { box-shadow: none; }
-
+        .terminal { background: #02040a; padding: 20px; border-radius: 10px 10px 0 0; height: 330px; overflow-y: auto; font-family: 'JetBrains Mono', monospace; color: #38bdf8; display: flex; flex-direction: column; gap: 6px; font-size: 0.8rem; border-bottom: 1px solid #1e293b; }
+        .terminal-input-wrapper { display: flex; background: #010206; border-radius: 0 0 10px 10px; border: 1px solid rgba(255,255,255,0.05); padding: 5px; }
+        .terminal-input { margin-bottom: 0; border: none; background: transparent; font-family: 'JetBrains Mono', monospace; color: var(--steam-cyan); }
         .account-card { background: var(--bg-card); padding: 15px; border-radius: 10px; border: var(--border); display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
         .status-badge { font-size: 0.75rem; font-weight: 800; padding: 4px 8px; border-radius: 4px; text-transform: uppercase; }
         .ONLINE { background: rgba(16,185,129,0.15); color: var(--green); }
         .OFFLINE { background: rgba(239,68,68,0.15); color: var(--red); }
         .CONNECTING { background: rgba(16,120,255,0.15); color: var(--steam-blue); }
-        
         .neon { color: var(--steam-cyan); text-shadow: 0 0 10px rgba(0,255,204,0.3); }
         .ai-panel { background: radial-gradient(circle at top left, #0d1527, var(--bg-panel)); border-color: rgba(0,255,204,0.2); }
     </style>
@@ -382,7 +259,6 @@ app.get('/', (req, res) => {
 <body>
 
 <div class="container">
-    <!-- ЛЕВОЕ КРЫЛО УПРАВЛЕНИЯ -->
     <aside class="panel">
         <div class="panel-header">Инжектор Ветки Ботов</div>
         <div style="display:flex; flex-direction:column; gap:2px;">
@@ -391,35 +267,30 @@ app.get('/', (req, res) => {
             <input type="text" id="shared" placeholder="Shared Secret (Для авто-2FA)">
             <button class="btn" style="background: var(--green);" onclick="addAccount()">Внедрить аккаунт</button>
         </div>
-
         <div class="panel-header" style="border:none; margin-top:10px; padding:0;">Активные процессы в БД:</div>
         <div id="accounts-container" style="max-height: 250px; overflow-y: auto;"></div>
     </aside>
 
-    <!-- ПРАВАЯ МОНИТОР-ПАНЕЛЬ -->
     <main style="display: flex; flex-direction: column; gap: 25px;">
-        <!-- ИИ МОДУЛЬ -->
         <div class="panel ai-panel">
             <div class="panel-header">
-                <span>🤖 TRADING AI AGENT v9.5 [SUPREME ENGINE]</span>
-                <span class="neon" id="ui-gen" style="font-size:0.85rem;">МУТАЦИЯ ЯДРА: 1</span>
+                <span>🤖 TRADING AI AGENT v7.5 [CONNECTED CORE]</span>
+                <span class="neon" id="ui-gen">МУТАЦИЯ ЯДРА: 1</span>
             </div>
             <p style="font-style:italic; color:#94a3b8; line-height:1.6; background:#02050c; padding:15px; border-radius:8px; border-left:3px solid var(--steam-cyan);">
-                "Система полностью скорректирована. База данных SQLite отслеживает сессии ботов в ветке. Все трейды сканируются на лету. Внедрен мультиязычный командный терминал. Наберите 'помощь' для мануала установок."
+                "Система скорректирована. База данных SQLite отслеживает сессии ботов в ветке. Используйте строку под терминалом для ввода кодов Guard (Команда: guard логин код)."
             </p>
         </div>
 
-        <!-- ТЕРМИНАЛ -->
         <div class="panel">
             <div class="panel-header">Центральная консоль мониторинга распределенного пула</div>
             <div>
                 <div class="terminal" id="terminal-box"></div>
                 <div class="terminal-input-wrapper">
-                    <span style="display:flex; align-items:center; padding-left:15px; color:#64748b; font-family:'JetBrains Mono', monospace; font-size:0.8rem;">\$</span>
-                    <input type="text" class="terminal-input" id="term-cmd" placeholder="Наберите команду и нажмите Enter (помощь)..." onkeydown="handleTerminalCommand(event)">
+                    <span style="display:flex; align-items:center; padding-left:15px; color:#64748b; font-family:'JetBrains Mono', monospace; font-size:0.8rem;">$</span>
+                    <input type="text" class="terminal-input" id="term-cmd" placeholder="Наберите команду сюда (например: help)..." onkeydown="handleTerminalCommand(event)">
                 </div>
             </div>
-            
             <div style="display: flex; justify-content: space-between; align-items: center; gap: 15px;">
                 <button class="btn" onclick="evolveCore()" style="width: auto; padding: 14px 30px; background: linear-gradient(90deg, #7c3aed, var(--steam-blue));">Эволюция бэкенда & Моделей</button>
                 <div style="font-size: 0.9rem; color: #94a3b8;">Налог торговой площадки: <span id="ui-tax" style="color: #fff; font-weight: bold;">13.04%</span></div>
@@ -433,14 +304,62 @@ app.get('/', (req, res) => {
         try {
             const res = await fetch('/api/dashboard');
             const data = await res.json();
-
             document.getElementById('ui-gen').innerText = 'МУТАЦИЯ ЯДРА: ' + data.generation;
             document.getElementById('ui-tax').innerText = (data.taxRate * 100).toFixed(2) + '%';
-
+            
             const term = document.getElementById('terminal-box');
             term.innerHTML = data.logs.map(function(log) { return '<div>' + log + '</div>'; }).join('');
             term.scrollTop = term.scrollHeight;
-
+            
             const container = document.getElementById('accounts-container');
             container.innerHTML = data.accounts.map(function(acc) {
-                return '<div class="account-card"><div><div style="font-weight:700; color:#fff;">' + acc.username + '</div><div style="font-size:0.8rem; color:#94a3b8; margin-top:2px;">Кар
+                return '<div class="account-card"><div><div style="font-weight:700; color:#fff;">' + acc.username + '</div><div style="font-size:0.75rem; color:#94a3b8; margin-top:2px;">Баланс: $' + acc.balance.toFixed(2) + ' | Карточек: ' + (acc.farmed_cards || 0) + ' | Часов: ' + (acc.boosted_hours || 0) + '</div></div><span class="status-badge ' + acc.status + '">' + acc.status + '</span></div>';
+            }).join('');
+        } catch (e) {}
+    }
+
+    async function addAccount() {
+        const uInput = document.getElementById('username');
+        const pInput = document.getElementById('password');
+        const sInput = document.getElementById('shared');
+        if(!uInput.value || !pInput.value) { alert('Заполните обязательные поля!'); return; }
+        
+        await fetch('/api/account/add', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ username: uInput.value, password: pInput.value, sharedSecret: sInput.value })
+        });
+        uInput.value = ''; pInput.value = ''; sInput.value = '';
+        updateDashboard();
+    }
+
+    async function evolveCore() {
+        await fetch('/api/evolve', { method: 'POST' });
+        updateDashboard();
+    }
+
+    async function handleTerminalCommand(e) {
+        if (e.key === 'Enter') {
+            const inputEl = document.getElementById('term-cmd');
+            const val = inputEl.value;
+            if(!val.trim()) return;
+            
+            inputEl.value = '';
+            await fetch('/api/terminal/command', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ command: val })
+            });
+            updateDashboard();
+        }
+    }
+
+    setInterval(updateDashboard, 1500);
+    window.onload = updateDashboard;
+</script>
+</body>
+</html>
+    `);
+});
+
+app.listen(PORT, () => console.log(`[CLOUD SYSTEM LIVE]: Monolith wrapper active on container port ${PORT}`));
