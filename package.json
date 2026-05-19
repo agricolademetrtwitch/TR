@@ -1,7 +1,7 @@
 {
   "name": "steam-autonomous-supreme-suite",
   "version": "5.0.0",
-  "description": "Resilient monolithic multi-account framework ready for cloud infrastructure",
+  "description": "Resilient Monolithic Multi-Account Steam Farm & Trading Core",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
