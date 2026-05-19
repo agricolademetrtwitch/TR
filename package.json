@@ -14,7 +14,7 @@
     "steam-tradeoffer-manager": "latest",
     "better-sqlite3": "^11.0.0"
   },
-  "engines": {
-    "node": ">=18.0.0"
+ "engines": {
+  "node": ">=22.0.0 <23.0.0"
   }
 }
