@@ -1,7 +1,7 @@
 {
   "name": "steam-autonomous-supreme-suite",
   "version": "5.0.0",
-  "description": "RESILIENT STEAM PRODUCTION ENGINE",
+  "description": "Resilient Monolithic Steam Farm and Trading Engine",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -12,7 +12,7 @@
     "steam-totp": "latest",
     "steamcommunity": "latest",
     "steam-tradeoffer-manager": "latest",
-    "better-sqlite3": "^11.0.0"
+    "sqlite3": "^5.1.7"
   },
  "engines": {
   "node": ">=22.0.0 <23.0.0"
