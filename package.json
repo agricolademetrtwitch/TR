@@ -1,9 +1,9 @@
 {
-  "name": "steam-autonomous-hyper-suite",
-  "version": "6.0.0",
-  "description": "Resilient 28-Command Monolithic Multi-Account Steam Farm & Trading Core",\
-  "license": "MIT",
+  "name": "steam-autonomous-supreme-suite",
+  "version": "6.5.0",
+  "description": "Enterprise Monolithic Multi-Account Steam Farm, Trading & DLC Unlocker Core",
   "main": "server.js",
+  "license": "MIT",
   "scripts": {
     "start": "node server.js"
   },
