@@ -1,7 +1,7 @@
 {
-  "name": "steam-autonomous-self-healing-suite",
-  "version": "8.0.0",
-  "description": "Enterprise Monolithic Self-Healing Steam Farm Suite",
+  "name": "steam-autonomous-supreme-suite",
+  "version": "7.5.0",
+  "description": "Enterprise Monolithic Steam Farm and Trading Suite with Turbo Booster",
   "main": "server.js",
   "license": "MIT",
   "scripts": {
