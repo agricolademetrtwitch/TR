@@ -13,7 +13,17 @@
     "steam-totp": "latest",
     "steamcommunity": "latest",
     "steam-tradeoffer-manager": "latest",
-    "sqlite3": "5.1.6"
+    "sqlite3": "5.1.7"
+  },
+  "overrides": {
+    "tar": "^6.2.3",
+    "glob": "^10.3.10",
+    "rimraf": "^5.0.5"
+  },
+  "resolutions": {
+    "tar": "^6.2.3",
+    "glob": "^10.3.10",
+    "rimraf": "^5.0.5"
   },
   "engines": {
     "node": ">=18.0.0"
