@@ -1,7 +1,7 @@
 {
   "name": "steam-autonomous-supreme-suite",
   "version": "5.0.0",
-  "description": "Resilient Monolithic Steam Farm and Trading Engine",
+  "description": "Resilient monolithic multi-account framework ready for cloud infrastructure",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -14,7 +14,7 @@
     "steam-tradeoffer-manager": "latest",
     "sqlite3": "^5.1.7"
   },
- "engines": {
-  "node": ">=22.0.0 <23.0.0"
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
