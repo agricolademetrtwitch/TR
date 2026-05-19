@@ -1,6 +1,7 @@
 /**
- * 🤖 STEAM AUTONOMOUS HUB v2026.SUPREME-EVO
- * Архитектура: Монолитное ядро максимальной комплектации с премиум CSS-дизайном
+ * 🤖 STEAM AUTONOMOUS HUB v2026.SUPREME
+ * Архитектура: Монолитное отказоустойчивое ядро максимальной комплектации
+ * Возможности: Мультиаккаунтинг, Буст 5 игр, Автофарм карточек, Сбор наклеек, Анти-API Скам
  */
 
 const express = require('express');
@@ -16,20 +17,22 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
+// Определение путей базы данных для облака Render/Railway или локального ПК
 const isCloud = process.env.RENDER || process.env.RAILWAY_STATIC_URL || false;
-const dbPath = isCloud ? path.join('/tmp', 'steam_godmode_v2026.db') : './steam_godmode_v2026.db';
+const dbPath = isCloud ? path.join('/tmp', 'steam_supreme_v2026.db') : './steam_supreme_v2026.db';
 
 const db = new sqlite3.Database(dbPath, (err) => {
     if (err) {
         console.error('[БД КРИТИЧЕСКАЯ ОШИБКА]:', err.message);
         process.exit(1);
     }
-    console.log(`[DATABASE]: Хранилище SQLite подключено: ${dbPath}`);
+    console.log(`[DATABASE]: Хранилище SQLite успешно подключено: ${dbPath}`);
 });
 
 db.run("PRAGMA busy_timeout = 10000;");
 db.run("PRAGMA journal_mode = WAL;");
 
+// Развертывание архитектуры таблиц репозитория
 db.serialize(() => {
     db.run(`CREATE TABLE IF NOT EXISTS system_config (id INTEGER PRIMARY KEY, generation INTEGER DEFAULT 1, tax_rate REAL DEFAULT 0.1304)`);
     db.run(`CREATE TABLE IF NOT EXISTS accounts (username TEXT PRIMARY KEY, password TEXT, shared_secret TEXT, balance REAL DEFAULT 2.00, status TEXT DEFAULT 'OFFLINE', farmed_cards INTEGER DEFAULT 0, boosted_hours INTEGER DEFAULT 0, active_apps TEXT DEFAULT '730,440,570,10,304930')`);
@@ -81,13 +84,13 @@ function launchAccountBot(username, password, sharedSecret) {
     client.on('steamGuard', (domain, callback) => {
         guardCallbacks[username] = callback;
         db.run(`UPDATE accounts SET status = 'CONNECTING' WHERE username = ?`, [username]);
-        saveLog(username, `[GUARD ЗАПРОС]: Требуется код 2FA. Выполните команду: код \${username} КОД`);
+        saveLog(username, `[GUARD ЗАПРОС]: Требуется код 2FA. Выполните команду в консоли сайта: guard \${username} КОД`);
     });
 
     client.on('loggedOn', () => {
         activeClients[username].reconnectAttempts = 0;
         db.run(`UPDATE accounts SET status = 'ONLINE' WHERE username = ?`, [username]);
-        saveLog(username, "Сессия подтверждена сервером. Бот онлайн.");
+        saveLog(username, "Сессия успешно подтверждена. Бот онлайн.");
         if (guardCallbacks[username]) delete guardCallbacks[username];
         
         client.setPersona(SteamUser.EPersonaState.Online);
@@ -97,7 +100,7 @@ function launchAccountBot(username, password, sharedSecret) {
             const appsArray = appsStr.split(',').map(x => parseInt(x.trim())).filter(x => !isNaN(x));
             if(activeClients[username].isFarmingHours) {
                 client.gamesPlayed(appsArray);
-                saveLog(username, `[БУСТ ТРЕКИНГ]: Запущена накрутка для AppID: \${appsArray.join(', ')}`);
+                saveLog(username, `[ДВИЖОК ЧАСОВ]: Накрутка запущена для AppID: \${appsArray.join(', ')}`);
             }
         });
 
@@ -114,7 +117,7 @@ function launchAccountBot(username, password, sharedSecret) {
         if (!activeClients[username]) return;
         const attempts = ++activeClients[username].reconnectAttempts;
         const delay = Math.min(attempts * 10000, 120000);
-        saveLog(username, `[СВЯЗЬ ОБОРВАНА]: Переподключение #\({attempts} через \){delay/1000}с...`);
+        saveLog(username, `[СВЯЗЬ ОБОРВАНА]: Код: \${eresult}. Переподключение #\({attempts} через \){delay/1000}с...`);
         
         if (activeClients[username].reconnectTimeout) clearTimeout(activeClients[username].reconnectTimeout);
         activeClients[username].reconnectTimeout = setTimeout(() => {
@@ -127,7 +130,7 @@ function launchAccountBot(username, password, sharedSecret) {
         community.setCookies(cookies);
         manager.setCookies(cookies, (err) => {
             if (err) return saveLog(username, `Сбой шлюза обменов: \${err.message}`);
-            saveLog(username, `Сетевые фильтры Анти-API Скам активированы.`);
+            saveLog(username, `Сетевые фильтры Анти-API Скам развернуты.`);
         });
 
         community.getSteamGoldForCards = function() {
@@ -135,7 +138,7 @@ function launchAccountBot(username, password, sharedSecret) {
                 url: 'https://steampowered.com',
                 form: { json: 1 }
             }, (err, res, body) => {
-                if(!err) saveLog(username, `[АВТОЗАБОР]: Наклейка в магазине Steam успешно получена.`);
+                if(!err) saveLog(username, `[МАГАЗИН]: Автоматически забран ежедневный бесплатный предмет/наклейка.`);
             });
         };
         setTimeout(() => { community.getSteamGoldForCards(); }, 10000);
@@ -163,7 +166,7 @@ function launchAccountBot(username, password, sharedSecret) {
     executeConnect();
 }
 
-// REST API БЭКЕНДА
+// RESTFUL BACKEND API
 app.get('/api/dashboard', (req, res) => {
     db.get(`SELECT * FROM system_config WHERE id = 1`, [], (err, config) => {
         db.all(`SELECT username, balance, status, farmed_cards, boosted_hours, active_apps FROM accounts`, [], (err, accs) => {
@@ -201,6 +204,7 @@ app.post('/api/evolve', (req, res) => {
     });
 });
 
+// ИНТЕРАКТИВНЫЙ МУЛЬТИЯЗЫЧНЫЙ ТЕРМИНАЛ КОМАНД С УСТАНОВКАМИ МОДУЛЕЙ
 app.post('/api/terminal/command', (req, res) => {
     const { command } = req.body;
     if (!command || String(command).trim() === "") return res.status(400).json({ error: "Пустая команда" });
@@ -222,7 +226,8 @@ app.post('/api/terminal/command', (req, res) => {
                (rawOp === 'сброс') ? 'clear' : rawOp;
 
     if (op === 'guard') {
-        const targetUser = parts[1]; const code = parts[2];
+        const targetUser = parts[1];
+        const code = parts[2];
         if (!targetUser || !code) return saveLog('SYSTEM', '❌ Синтаксис: guard [логин] [код]');
         if (guardCallbacks[targetUser]) {
             saveLog(targetUser, `Инжектирование токена 2FA: [\${code}]`);
@@ -238,12 +243,12 @@ app.post('/api/terminal/command', (req, res) => {
                           '• "guard / код [user] [code]" - Передать токен 2FA.\n' +
                           '• "status / статус" - Количество активных процессов в ОЗУ.\n' +
                           '• "accounts / аккаунты" - Вывести сетку аккаунтов из БД.\n' +
-                          '• "db / бд" - Оптимизация структуры базы данных SQLite.\n' +
+                          '• "db / бд" - Оптимизация и очистка структуры базы данных SQLite.\n' +
                           '• "balance / баланс [user] [сумма]" - Изменить баланс бота в БД.\n' +
                           '• "farm / фарм [user] [on/off]" - Переключить буст часов.\n' +
                           '• "games / игры [user] [AppID1,AppID2...]" - Изменить AppID игр для буста.\n' +
                           '• "evolve / эволюция" - ИИ-мутация налоговых шлюзов.\n' +
-                          '• "delete / удалить [user]" - Удалить аккаунт из БД.\n' +
+                          '• "delete / удалить [user]" - Удалить аккаунт из БД и завершить сессию.\n' +
                           '• "clear / сброс" - Полностью очистить журнал логов.');
         res.json({ success: true });
     } else if (op === 'status') {
@@ -260,7 +265,7 @@ app.post('/api/terminal/command', (req, res) => {
     } else if (op === 'db') {
         db.run("VACUUM;", [], (err) => {
             if (err) saveLog('SYSTEM', `Ошибка оптимизации: \${err.message}`);
-            else saveLog('SYSTEM', `[БД УСПЕХ]: Структура SQLite оптимизирована.`);
+            else saveLog('SYSTEM', `[БД УСПЕХ]: Структура SQLite оптимизирована, кэш очищен.`);
         });
         res.json({ success: true });
     } else if (op === 'balance') {
@@ -309,7 +314,7 @@ app.post('/api/terminal/command', (req, res) => {
         db.get('SELECT generation FROM system_config WHERE id = 1', [], (err, row) => {
             const next = (row ? row.generation : 1) + 1;
             db.run(`UPDATE system_config SET generation = ? WHERE id = 1`, [next], () => {
-                saveLog('AI_AGENT', `Принудительная мутация. Поколение: \${next}.`);
+                saveLog('AI_AGENT', `Принудительная мутация. Стек переведен на Поколение \${next}.`);
             });
         });
         res.json({ success: true });
@@ -319,131 +324,123 @@ app.post('/api/terminal/command', (req, res) => {
         });
         res.json({ success: true });
     } else {
-        saveLog('SYSTEM', `❌ Команда не распознана. Введите "помощь" для просмотра всех опций.`);
+        saveLog('SYSTEM', `❌ Команда не распознана: "\${rawOp}". Введите "помощь" для просмотра всех опций.`);
         res.json({ success: false });
     }
 });
 
-// МОНОЛИТНЫЙ ВЕБ-ИНТЕРФЕЙС С КИБЕРПАНК ПРЕМИУМ ДИЗАЙНОМ
+// ПЕРЕРАБОТАННЫЙ СУПЕР-ФРОНТЕНД ВЕБ-ИНТЕРФЕЙСА (С ОКОННЫМ КЛИЕНТОМ ВВОДА ТЕРМИНАЛА)
 app.get('/', (req, res) => {
     res.send(`
 <!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Steam Multi-Account Cloud System v5.0</title>
+    <title>Steam Multi-Account Control Panel v2.5</title>
     <link href="https://googleapis.com" rel="stylesheet">
     <style>
         :root {
             --bg-deep: #030712;
-            --bg-panel: #0b111e;
-            --bg-card: #151f32;
+            --bg-panel: #0b0f19;
+            --bg-card: #131926;
             --steam-blue: #1078ff;
             --steam-cyan: #00ffcc;
             --green: #10b981;
             --red: #ef4444;
-            --text-main: #f3f4f6;
-            --text-muted: #64748b;
-            --border: 1px solid rgba(255, 255, 255, 0.05);
+            --border: 1px solid rgba(255,255,255,0.05);
         }
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', sans-serif; transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
-        body { background-color: var(--bg-deep); color: var(--text-main); padding: 30px; display: flex; justify-content: center; }
+        * { box-sizing: border-box; font-family: 'Plus Jakarta Sans', sans-serif; margin: 0; padding: 0; }
+        body { background: var(--bg-deep); color: #f3f4f6; padding: 25px; }
         
-        .container { width: 100%; max-width: 1700px; display: grid; grid-template-columns: 380px 1fr; gap: 30px; position: relative; z-index: 2; }
+        .container { max-width: 1750px; margin: 0 auto; display: grid; grid-template-columns: 360px 1fr; gap: 25px; }
         @media (max-width: 1100px) { .container { grid-template-columns: 1fr; } }
         
-        /* Стилизация панелей (Стеклянный эффект) */
-        .panel { background: var(--bg-panel); border: var(--border); border-radius: 20px; padding: 30px; display: flex; flex-direction: column; gap: 20px; box-shadow: 0 20px 50px rgba(0,0,0,0.6); position: relative; overflow: hidden; backdrop-filter: blur(20px); }
-        .panel::before { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 4px; background: linear-gradient(90deg, var(--steam-blue), var(--steam-cyan)); }
+        .panel { background: var(--bg-panel); border: var(--border); border-radius: 16px; padding: 25px; display: flex; flex-direction: column; gap: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.5); }
+        .panel-header { font-size: 1.1rem; font-weight: 700; color: #fff; border-bottom: 2px solid #1e293b; padding-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
         
-        .panel-header { font-size: 1.25rem; font-weight: 700; color: #fff; border-bottom: 2px solid #1e293b; padding-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
+        input { background: #03060f; border: var(--border); color: #fff; padding: 14px; border-radius: 8px; width: 100%; font-size: 0.9rem; margin-bottom: 12px; }
+        input:focus { border-color: var(--steam-cyan); outline: none; box-shadow: 0 0 10px rgba(0,255,245,0.1); }
         
-        /* Элементы форм */
-        .input-box { display: flex; flex-direction: column; gap: 6px; }
-        label { font-size: 0.8rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
-        input { background: #040814; border: var(--border); color: #fff; padding: 14px; border-radius: 10px; font-size: 0.95rem; width: 100%; font-family: monospace; }
-        input:focus { border-color: var(--steam-cyan); outline: none; box-shadow: 0 0 15px rgba(0, 255, 204, 0.15); background: #060c1f; }
+        .btn { background: var(--steam-blue); color: #fff; padding: 14px; border: none; border-radius: 8px; font-weight: 700; cursor: pointer; text-transform: uppercase; width: 100%; font-size: 0.8rem; letter-spacing: 0.5px; }
+        .btn:hover { background: #2563eb; box-shadow: 0 0 15px rgba(16,120,255,0.4); }
         
-        /* Кнопки */
-        .btn { background: linear-gradient(90deg, var(--steam-blue), #1e40af); color: #fff; padding: 15px; border: none; border-radius: 10px; font-weight: 700; cursor: pointer; text-transform: uppercase; font-size: 0.85rem; letter-spacing: 0.8px; box-shadow: 0 4px 15px rgba(16, 120, 255, 0.2); }
-        .btn:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(16, 120, 255, 0.4); background: linear-gradient(90deg, #2563eb, #1d4ed8); }
-        .btn-green { background: linear-gradient(90deg, var(--green), #065f46); box-shadow: 0 4px 15px rgba(16, 185, 129, 0.2); }
-        .btn-green:hover { background: linear-gradient(90deg, #059669, #047857); box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4); }
+        .terminal { background: #02040a; padding: 20px; border-radius: 10px 10px 0 0; border: var(--border); height: 350px; overflow-y: auto; font-family: 'JetBrains Mono', monospace; color: #38bdf8; display: flex; flex-direction: column; gap: 6px; font-size: 0.8rem; border-bottom: 1px solid #1e293b; white-space: pre-wrap; }
+        .terminal-input-wrapper { display: flex; background: #010206; border-radius: 0 0 10px 10px; border: 1px solid rgba(255,255,255,0.05); border-top: none; padding: 5px; }
+        .terminal-input { margin-bottom: 0; border: none; background: transparent; font-family: 'JetBrains Mono', monospace; color: var(--steam-cyan); padding: 10px 14px; }
+        .terminal-input:focus { box-shadow: none; }
+
+        .account-card { background: var(--bg-card); padding: 15px; border-radius: 10px; border: var(--border); display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
+        .status-badge { font-size: 0.75rem; font-weight: 800; padding: 4px 8px; border-radius: 4px; text-transform: uppercase; }
+        .ONLINE { background: rgba(16,185,129,0.15); color: var(--green); }
+        .OFFLINE { background: rgba(239,68,68,0.15); color: var(--red); }
+        .CONNECTING { background: rgba(16,120,255,0.15); color: var(--steam-blue); }
         
-        /* Сетка аккаунтов */
-        .account-card { background: var(--bg-card); padding: 18px; border-radius: 12px; border: var(--border); display: flex; justify-content: space-between; align-items: center; margin-top: 5px; box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
-        .account-card:hover { border-color: rgba(255,255,255,0.15); transform: scale(1.02); }
-        .status-badge { font-size: 0.75rem; font-weight: 800; padding: 5px 10px; border-radius: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
-        .ONLINE { background: rgba(16, 185, 129, 0.12); color: var(--green); border: 1px solid rgba(16, 185, 129, 0.3); box-shadow: 0 0 10px rgba(16, 185, 129, 0.1); }
-        .OFFLINE { background: rgba(239, 68, 68, 0.12); color: var(--red); border: 1px solid rgba(239, 68, 68, 0.3); }
-        .CONNECTING { background: rgba(16, 120, 255, 0.12); color: var(--steam-blue); border: 1px solid rgba(16, 120, 255, 0.3); }
-        
-        /* Консоль терминала */
-        .terminal-wrapper { display: flex; flex-direction: column; border-radius: 14px; overflow: hidden; border: var(--border); box-shadow: 0 10px 30px rgba(0,0,0,0.4); }
-        .terminal { background: #02050c; padding: 22px; height: 380px; overflow-y: auto; font-family: 'JetBrains Mono', monospace; color: #38bdf8; display: flex; flex-direction: column; gap: 8px; font-size: 0.85rem; line-height: 1.5; }
-        .terminal-input-wrapper { display: flex; background: #010205; border-top: 1px solid #1e293b; padding: 12px 20px; align-items: center; gap: 12px; }
-        .term-symbol { color: var(--steam-cyan); font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 1rem; }
-        .terminal-input { margin-bottom: 0; border: none; background: transparent; font-family: 'JetBrains Mono', monospace; color: var(--steam-cyan); padding: 0; font-size: 0.95rem; }
-        .terminal-input:focus { box-shadow: none; background: transparent; }
-        
-        .neon { color: var(--steam-cyan); text-shadow: 0 0 12px rgba(0, 255, 204, 0.4); }
-        .ai-panel { background: radial-gradient(circle at top left, #0a162b, var(--bg-panel)); border-color: rgba(0, 255, 204, 0.15); }
-        
-        /* Декоративный размытый бэкграунд */
-        .blur-sphere { position: fixed; width: 500px; height: 500px; background: radial-gradient(circle, rgba(16, 120, 255, 0.08) 0%, transparent 70%); filter: blur(90px); top: -100px; right: -100px; z-index: 1; pointer-events: none; }
+        .neon { color: var(--steam-cyan); text-shadow: 0 0 10px rgba(0,255,204,0.3); }
+        .ai-panel { background: radial-gradient(circle at top left, #0d1527, var(--bg-panel)); border-color: rgba(0,255,204,0.2); }
     </style>
 </head>
 <body>
 
-<div class="blur-sphere"></div>
-
 <div class="container">
-    <!-- ЛЕВАЯ СКЛАДСКАЯ ПАНЕЛЬ -->
+    <!-- ЛЕВОЕ КРЫЛО УПРАВЛЕНИЯ -->
     <aside class="panel">
-        <div class="panel-header">Инжектор Пул-Ветки</div>
-        
-        <div class="input-box">
-            <label>Логин аккаунта</label>
-            <input type="text" id="username" placeholder="Введите имя...">
+        <div class="panel-header">Инжектор Ветки Ботов</div>
+        <div style="display:flex; flex-direction:column; gap:2px;">
+            <input type="text" id="username" placeholder="Steam Логин">
+            <input type="password" id="password" placeholder="Steam Пароль">
+            <input type="text" id="shared" placeholder="Shared Secret (Для авто-2FA)">
+            <button class="btn" style="background: var(--green);" onclick="addAccount()">Внедрить аккаунт</button>
         </div>
-        <div class="input-box">
-            <label>Пароль аккаунта</label>
-            <input type="password" id="password" placeholder="Введите секретный ключ...">
-        </div>
-        <div class="input-box">
-            <label>Shared Secret (2FA Мафа)</label>
-            <input type="text" id="shared" placeholder="Оставьте пустым при коде на телефон">
-        </div>
-        
-        <button class="btn btn-green" onclick="addAccount()">Внедрить & Запустить</button>
-        
-        <div class="panel-header" style="border:none; margin-top:15px; padding:0;">Активные процессы в сети:</div>
-        <div id="accounts-container" style="max-height: 280px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;"></div>
+
+        <div class="panel-header" style="border:none; margin-top:10px; padding:0;">Активные процессы в БД:</div>
+        <div id="accounts-container" style="max-height: 250px; overflow-y: auto;"></div>
     </aside>
 
-    <!-- ПРАВАЯ ОБЛАСТЬ КУРАТОРА -->
-    <main style="display: flex; flex-direction: column; gap: 30px;">
+    <!-- ПРАВАЯ МОНИТОР-ПАНЕЛЬ -->
+    <main style="display: flex; flex-direction: column; gap: 25px;">
+        <!-- ИИ МОДУЛЬ -->
         <div class="panel ai-panel">
             <div class="panel-header">
-                <span>🤖 TRADING AI AGENT v9.5 [PREMIUM ARCHITECTURE]</span>
-                <span class="neon" id="ui-gen">МУТАЦИЯ ЯДРА: 1</span>
+                <span>🤖 TRADING AI AGENT v9.5 [SUPREME ENGINE]</span>
+                <span class="neon" id="ui-gen" style="font-size:0.85rem;">МУТАЦИЯ ЯДРА: 1</span>
             </div>
-            <p style="font-style:italic; color:#94a3b8; line-height:1.6; background: rgba(2,5,12,0.6); padding:18px; border-radius:12px; border-left:4px solid var(--steam-cyan); font-size:0.95rem;">
-                "Экосистема адаптирована. Нейронные шлюзы очищены от рекламы и сторонних ссылок. Модуль SQLite готов к параллельным нагрузкам. Введите 'помощь' в командную консоль для вывода всех зашитых директив управления."
+            <p style="font-style:italic; color:#94a3b8; line-height:1.6; background:#02050c; padding:15px; border-radius:8px; border-left:3px solid var(--steam-cyan);">
+                "Система полностью скорректирована. База данных SQLite отслеживает сессии ботов в ветке. Все трейды сканируются на лету. Внедрен мультиязычный командный терминал. Наберите 'помощь' для мануала установок."
             </p>
         </div>
 
+        <!-- ТЕРМИНАЛ -->
         <div class="panel">
-            <div class="panel-header">Центральный интерактивный мониторинг распределенных потоков</div>
-            
-            <div class="terminal-wrapper">
+            <div class="panel-header">Центральная консоль мониторинга распределенного пула</div>
+            <div>
                 <div class="terminal" id="terminal-box"></div>
                 <div class="terminal-input-wrapper">
-                    <span class="term-symbol">&gt;_</span>
-                    <input type="text" class="terminal-input" id="term-cmd" placeholder="Наберите системную команду (например: помощь, бд, статус) и нажмите Enter..." onkeydown="handleTerminalCommand(event)">
+                    <span style="display:flex; align-items:center; padding-left:15px; color:#64748b; font-family:'JetBrains Mono', monospace; font-size:0.8rem;">\$</span>
+                    <input type="text" class="terminal-input" id="term-cmd" placeholder="Наберите команду и нажмите Enter (помощь)..." onkeydown="handleTerminalCommand(event)">
                 </div>
             </div>
             
-            <div style="display: flex; justify-content: space-between; align-items: center; gap: 15px; margin-top: 5px;">
-                <button class="btn" onclick="evolveCore()" style="width: auto; padding: 14px 35px; background: linear-gradient(90deg, #7c3aed, var(--steam-blue));">Эволюция бэкенда & Моделей</button>
-                <div style="font-size: 0.95rem; color: var(--text-muted);">Налог торговой площадки Valve: <span id="ui-tax"
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 15px;">
+                <button class="btn" onclick="evolveCore()" style="width: auto; padding: 14px 30px; background: linear-gradient(90deg, #7c3aed, var(--steam-blue));">Эволюция бэкенда & Моделей</button>
+                <div style="font-size: 0.9rem; color: #94a3b8;">Налог торговой площадки: <span id="ui-tax" style="color: #fff; font-weight: bold;">13.04%</span></div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<script>
+    async function updateDashboard() {
+        try {
+            const res = await fetch('/api/dashboard');
+            const data = await res.json();
+
+            document.getElementById('ui-gen').innerText = 'МУТАЦИЯ ЯДРА: ' + data.generation;
+            document.getElementById('ui-tax').innerText = (data.taxRate * 100).toFixed(2) + '%';
+
+            const term = document.getElementById('terminal-box');
+            term.innerHTML = data.logs.map(function(log) { return '<div>' + log + '</div>'; }).join('');
+            term.scrollTop = term.scrollHeight;
+
+            const container = document.getElementById('accounts-container');
+            container.innerHTML = data.accounts.map(function(acc) {
+                return '<div class="account-card"><div><div style="font-weight:700; color:#fff;">' + acc.username + '</div><div style="font-size:0.8rem; color:#94a3b8; margin-top:2px;">Кар
