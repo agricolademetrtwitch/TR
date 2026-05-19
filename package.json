@@ -1,7 +1,7 @@
 {
   "name": "steam-autonomous-godmode-suite",
-  "version": "4.0.0",
-  "description": "Enterprise-grade monolithic Steam multi-account farm and trading engine",
+  "version": "5.0.0",
+  "description": "Enterprise monolithic Steam multi-account farm engine",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
