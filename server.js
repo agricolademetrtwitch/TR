@@ -1,7 +1,7 @@
 /**
- * 🤖 STEAM AUTONOMOUS HUB v2026.SELF-HEALING
- * Архитектура: Монолитный самоисцеляющийся контейнер (Self-Healing Core)
- * Модули: 6 Вкладок UI, Пул ASF, SAM Picker, DLC Unlocker, Трейд-Менеджер, ИИ-Исправление Ошибок
+ * 🤖 STEAM AUTONOMOUS HUB v2026.SUPREME-BOOSTER
+ * Модули: База Данных, Пул ASF, SAM Picker, DLC Анлокер, Трейд-Менеджер, ИИ-Терминал
+ * Новое: Внедрен Модуль Крафта Бустеров (Steam Booster Pack Creator Engine)
  */
 
 const express = require('express');
@@ -18,14 +18,6 @@ const PORT = process.env.PORT || 3000;
 const MASTER_PASSWORD = process.env.ADMIN_PASSWORD || "ADMIN1234"; 
 
 app.use(express.json());
-
-// Глобальный перехватчик необработанных исключений (Защита от падения сервера 24/7)
-process.on('unhandledRejection', (reason, promise) => {
-    console.error('[ИИ-АВТОИСПРАВЛЕНИЕ]: Перехвачен критический сбой Promise:', reason);
-});
-process.on('uncaughtException', (err, origin) => {
-    console.error('[ИИ-АВТОИСПРАВЛЕНИЕ]: Перехвачена критическая ошибка потока:', err.message);
-});
 
 const isCloud = process.env.RENDER || process.env.RAILWAY_STATIC_URL || false;
 const dbPath = isCloud ? path.join('/tmp', 'steam_supreme_v2026.db') : './steam_supreme_v2026.db';
@@ -57,7 +49,6 @@ function saveLog(username, message) {
 }
 
 function launchAccountBot(username, password, sharedSecret, proxyStr) {
-    // Безопасный сброс старых слушателей (Защита от утечек ОЗУ)
     if (activeClients[username]) {
         try {
             if (activeClients[username].farmInterval) clearInterval(activeClients[username].farmInterval);
@@ -81,58 +72,34 @@ function launchAccountBot(username, password, sharedSecret, proxyStr) {
         try { code2FA = SteamTotp.generateAuthCode(sharedSecret.trim()); } catch(e) {}
     }
 
-    const executeLogOn = () => {
-        try {
-            client.logOn({ accountName: username, password: password, twoFactorCode: code2FA });
-        } catch (err) {
-            saveLog(username, `[АВТОИСПРАВЛЕНИЕ]: Сбой вызова метода входа. Перезапуск через 15с. Ошибка: \${err.message}`);
-            setTimeout(executeLogOn, 15000);
-        }
-    };
+    client.logOn({ accountName: username, password: password, twoFactorCode: code2FA });
 
     client.on('steamGuard', (domain, callback) => {
         guardCallbacks[username] = callback;
         db.run(`UPDATE accounts SET status = 'CONNECTING' WHERE username = ?`, [username]);
-        saveLog(username, `[GUARD ЗАПРОС]: Требуется код 2FA. Выполните в консоли: guard \${username} КОД`);
+        saveLog(username, `[GUARD ЗАПРОС]: Введите проверочный код в терминал: guard \${username} КОД`);
     });
 
     client.on('loggedOn', () => {
         db.run(`UPDATE accounts SET status = 'ONLINE' WHERE username = ?`, [username]);
-        saveLog(username, "Авторизация успешно подтверждена сервером Valve (ASF Core).");
+        saveLog(username, "Авторизация подтверждена. Бот онлайн (Бустер и ASF активны).");
         if (guardCallbacks[username]) delete guardCallbacks[username];
         
         client.setPersona(SteamUser.EPersonaState.Online);
         client.gamesPlayed(activeClients[username].apps); 
-        saveLog(username, `[ФАРМ ЧАСОВ]: Успешный запуск AppID: \${activeClients[username].apps.join(', ')}`);
         
-        if (activeClients[username].farmInterval) clearInterval(activeClients[username].farmInterval);
         activeClients[username].farmInterval = setInterval(() => {
-            if (activeClients[username] && activeClients[username].isFarming) {
+            if (activeClients[username].isFarming) {
                 db.run(`UPDATE accounts SET boosted_hours = boosted_hours + 1 WHERE username = ?`, [username]);
             }
         }, 3600000);
     });
 
-    // МОДУЛЬ АВТОИСПРАВЛЕНИЯ ОШИБОК СЕТИ (Линейное авто-восстановление сокетов)
-    client.on('disconnected', (eresult) => {
-        db.run(`UPDATE accounts SET status = 'OFFLINE' WHERE username = ?`, [username]);
-        saveLog(username, `[СВЯЗЬ ОБОРВАНА]: Steam-сервер закрыл сокет (Код: \${eresult}). Запуск исцеления сессии через 20 секунд...`);
-        
-        setTimeout(() => {
-            if (activeClients[username]) {
-                code2FA = (sharedSecret && sharedSecret.trim().length > 3) ? SteamTotp.generateAuthCode(sharedSecret.trim()) : "";
-                executeLogOn();
-            }
-        }, 20000);
-    });
-
     manager.on('newOffer', (offer) => {
         if (offer.itemsToGive.length > 0 && offer.itemsToReceive.length === 0) {
-            saveLog(username, `[ЗАЩИТА]: Перехвачен несанкционированный слив скинов в трейде №\${offer.id}! ОТМЕНА.`);
             offer.decline(); return;
         }
         if (offer.itemsToGive.length === 0 && offer.itemsToReceive.length > 0) {
-            saveLog(username, `[ASF DROP]: Поступили подарочные предметы. Авто-принятие.`);
             offer.accept((err) => {
                 if (!err) db.run(`UPDATE accounts SET balance = balance + 0.45, farmed_cards = farmed_cards + 1 WHERE username = ?`, [username]);
             });
@@ -141,10 +108,8 @@ function launchAccountBot(username, password, sharedSecret, proxyStr) {
 
     client.on('error', (err) => {
         db.run(`UPDATE accounts SET status = 'ERROR' WHERE username = ?`, [username]);
-        saveLog(username, `[ИИ-ПЕРЕХВАТ ОШИБКИ]: Процесс изолирован. Ошибка: \${err.message}`);
+        saveLog(username, `Сбой сокета: \${err.message}`);
     });
-
-    executeLogOn();
 }
 
 // REST API
@@ -181,18 +146,58 @@ app.post('/api/account/add', (req, res) => {
     });
 });
 
+// КАНАЛ ПОЛНОЙ МАТРИЦЫ КОМАНД С ТРЕЙДИНГ СИСТЕМОЙ И БУСТЕРОМ КАРТОЧЕК
 app.post('/api/terminal/command', (req, res) => {
     const { command, pass } = req.body;
     if (pass !== MASTER_PASSWORD) return res.status(403).json({ error: "Отказ" });
 
     const parts = String(command).trim().split(/\s+/);
     const rawOp = parts[0].toLowerCase();
-    const op = (rawOp === 'код') ? 'guard' : (rawOp === 'помощь') ? 'help' : (rawOp === 'сбор') ? 'collect' : (rawOp === 'анлок') ? 'unlock' : (rawOp === 'dlc') ? 'dlc_unlock' : rawOp;
+    const op = (rawOp === 'код') ? 'guard' : (rawOp === 'помощь') ? 'help' : (rawOp === 'сбор') ? 'collect' : (rawOp === 'анлок') ? 'unlock' : (rawOp === 'dlc') ? 'dlc_unlock' : (rawOp === 'бустер') ? 'booster' : (rawOp === 'самоцветы') ? 'gems' : rawOp;
 
     if (op === 'guard') {
         const user = parts[1]; const code = parts[2];
         if (guardCallbacks[user]) { guardCallbacks[user](code); saveLog(user, `Код Guard передан в сессию.`); }
         else { saveLog('SYSTEM', 'Нет активных запросов Guard.'); }
+        return res.json({ success: true });
+    }
+    if (op === 'booster') {
+        const user = parts[1]; const appId = parseInt(parts[2]);
+        if (!activeClients[user] || isNaN(appId)) return res.json({ success: false, error: saveLog('SYSTEM', 'Синтаксис: бустер [user] [AppID]') });
+        
+        saveLog(user, `[БУСТЕР КРАФТ]: Запуск сетевого запроса на создание комплекта карточек для AppID: \${appId}...`);
+        
+        // Прямой вызов защищенного метода крафта бустер-паков торговой площадки Valve через сессию SteamCommunity
+        activeClients[user].community.request.post({
+            url: 'https://steamcommunity.com',
+            form: {
+                sessionid: activeClients[user].community.sessionID,
+                appid: appId,
+                series: 1,
+                tradability_preference: 2
+            },
+            json: true
+        }, (err, response, body) => {
+            if (err) return saveLog(user, `❌ Сбой крафта: \${err.message}`);
+            if (body && body.success === 1) {
+                saveLog(user, `🎉 [БУСТЕР УСПЕХ]: Комплект карточек для AppID \({appId} успешно создан! Результат: \){body.purchase_result.goo_value_created} Gems потрачено.`);
+            } else {
+                saveLog(user, `❌ Отказ Valve: \${body ? body.message || 'Недостаточно самоцветов или КД на крафт' : 'Ошибка сети'}`);
+            }
+        });
+        return res.json({ success: true });
+    }
+    if (op === 'gems') {
+        const user = parts[1];
+        if (!activeClients[user]) return res.json({ success: false, error: saveLog('SYSTEM', 'Бот не в сети или не существует.') });
+        
+        saveLog(user, `[СКАНИРОВАНИЕ]: Проверка баланса самоцветов (Gems) в инвентаре...`);
+        activeClients[user].manager.loadInventory(753, 6, true, (err, items) => {
+            if (err || !items) return saveLog(user, `Не удалось загрузить инвентарь сообщества.`);
+            const gemsItem = items.find(i => i.market_hash_name === 'Gems' || i.type.includes('Самоцветы'));
+            const count = gemsItem ? gemsItem.amount : 0;
+            saveLog(user, ` Баланс инвентаря: Найдено \${count} шт. самоцветов.`);
+        });
         return res.json({ success: true });
     }
     if (op === 'dlc_unlock') {
@@ -213,11 +218,11 @@ app.post('/api/terminal/command', (req, res) => {
         return res.json({ success: true });
     }
     if (op === 'collect') {
-        saveLog('SYSTEM', 'Запущен Advanced Trade Manager: пересылка инвентарей ботов на Мейн...');
+        saveLog('SYSTEM', 'Запущен Advanced Trade Manager: пересылка предметов на Мейн...');
         return res.json({ success: true });
     }
     if (op === 'help') {
-        saveLog('SYSTEM', 'Команды:\n• guard [user] [code]\n• dlc [user] [AppIDs]\n• unlock [user] [appId]\n• collect');
+        saveLog('SYSTEM', 'Команды:\n• guard [user] [code]\n• dlc [user] [AppIDs]\n• unlock [user] [appId]\n• booster [user] [appId] - Скрафтить бустер-пак\n• gems [user] - Проверить баланс самоцветов\n• collect');
         return res.json({ success: true });
     }
     res.json({ success: false });
@@ -230,7 +235,7 @@ app.get('/', (req, res) => {
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Steam Premium Cyber-Console v8.0</title>
+    <title>Steam Premium Cyber-Console v7.0</title>
     <link href="https://googleapis.com" rel="stylesheet">
     <style>
         :root { --bg-deep: #07090e; --cyber-panel: rgba(23, 26, 33, 0.85); --cyber-cyan: #00f0ff; --cyber-green: #00ff87; --cyber-red: #ff3b3b; --steam-blue: #66c0f4; --steam-accent: #2a475e; --glass-border: rgba(255, 255, 255, 0.04); }
@@ -266,7 +271,7 @@ app.get('/', (req, res) => {
 <body>
 
     <header class="header-bar">
-        <div class="logo">⚙️ STEAM СТАНЦИЯ <span>v8.0</span></div>
+        <div class="logo">⚙️ STEAM СТАНЦИЯ <span>v7.0</span></div>
         <nav class="tabs-container">
             <button class="tab-trigger active" onclick="routeTab('pool')">👥 Пул ботов</button>
             <button class="tab-trigger" onclick="routeTab('sam')">🎯 SAM Ачивки</button>
@@ -277,7 +282,7 @@ app.get('/', (req, res) => {
         </nav>
     </header>
 
-    <!-- ТАБ 1: ПУЛ БОТОВ -->
+    <!-- ВКЛАДКА 1 -->
     <div id="view-pool" class="viewport-wrapper layout-grid active">
         <aside class="panel-card">
             <div class="panel-title">Внедрение Бота (ASF Core)</div>
@@ -293,7 +298,7 @@ app.get('/', (req, res) => {
         </main>
     </div>
 
-    <!-- ТАБ 2: SAM PICKER -->
+    <!-- ВКЛАДКА 2 -->
     <div id="view-sam" class="viewport-wrapper">
         <div class="panel-card" style="max-width: 600px; margin: 0 auto; width:100%;">
             <div class="panel-title">🎯 Разблокировка достижений (SAM)</div>
@@ -303,7 +308,7 @@ app.get('/', (req, res) => {
         </div>
     </div>
 
-    <!-- ТАБ 3: ADVANCED TRADE MANAGER -->
+    <!-- ВКЛАДКА 3 -->
     <div id="view-trade" class="viewport-wrapper">
         <div class="panel-card" style="max-width: 600px; margin: 0 auto; width:100%;">
             <div class="panel-title">📦 Пересылка предметов (Advanced Trade Manager)</div>
@@ -311,29 +316,29 @@ app.get('/', (req, res) => {
         </div>
     </div>
 
-    <!-- ТАБ 4: DLC UNLOCKER -->
+    <!-- ВКЛАДКА 4 -->
     <div id="view-dlc" class="viewport-wrapper">
         <div class="panel-card" style="max-width: 600px; margin: 0 auto; width:100%;">
             <div class="panel-title">🔑 Модуль DLC Unlocker</div>
             <input type="text" id="dlc-user" placeholder="Логин целевого бота">
             <input type="text" id="dlc-appids" placeholder="ID дополнений через запятую">
-            <button class="btn-action" onclick="triggerDlcUnlock()" style="background:linear-gradient(135deg, #ec4899, #be185d);">Активировать лицензии дополнений</button>
+            <button class="btn-action" onclick="triggerDlcUnlock()" style="background:linear-gradient(135deg, #ec4899, #be185d);">Aктивировать лицензии дополнений</button>
         </div>
     </div>
 
-    <!-- ТАБ 5: ИИ-ТЕРМИНАЛ -->
+    <!-- ВКЛАДКА 5 -->
     <div id="view-terminal" class="viewport-wrapper">
         <div class="panel-card" style="width:100%;">
-            <div class="panel-title">Глобальная Консоль Автоисправления <span id="generation-tag" style="color:var(--cyber-cyan);">МУТАЦИЯ ЯДРА: 1</span></div>
+            <div class="panel-title">Глобальная Консоль Walftech Engine <span id="generation-tag" style="color:var(--cyber-cyan);">МУТАЦИЯ ЯДРА: 1</span></div>
             <div class="terminal-viewport" id="terminal-target"></div>
             <div class="cmd-line-wrapper">
                 <span style="font-family:'JetBrains Mono'; color:#64748b; font-size:0.9rem; padding-right:10px;">\$</span>
-                <input type="text" class="cmd-input" id="terminal-input-node" placeholder="Команды: help, guard [user] [код]..." onkeydown="submitCommand(event)">
+                <input type="text" class="cmd-input" id="terminal-input-node" placeholder="Команды: help, guard [user] [код], booster [user] [AppID], gems [user]..." onkeydown="submitCommand(event)">
             </div>
         </div>
     </div>
 
-    <!-- ТАБ 6: НАСТРОЙКИ СИСТЕМЫ -->
+    <!-- ВКЛАДКА 6 -->
     <div id="view-config" class="viewport-wrapper">
         <div class="panel-card" style="max-width: 600px; margin: 0 auto; width:100%;">
             <div class="panel-title">Шлюзы Безопасности & Ключи</div>
@@ -364,7 +369,7 @@ app.get('/', (req, res) => {
             term.scrollTop = term.scrollHeight;
 
             const grid = document.getElementById('bot-grid-target');
-            grid.innerHTML = data.accounts.map(acc => `
+            grid.innerHTML = data.accounts.map(acc => \`
                 <div class="bot-node \${acc.status}">
                     <div>
                         <div style="font-weight:700; color:#fff; font-size:1.05rem;">\${acc.username}</div>
@@ -376,7 +381,7 @@ app.get('/', (req, res) => {
                         <span style="font-size:0.9rem; font-weight:700; color:var(--cyber-cyan); font-family:'JetBrains Mono';">\$\${acc.balance.toFixed(2)}</span>
                     </div>
                 </div>
-            `).join('');
+            \`).join('');
         } catch(e) {}
     }
 
@@ -415,4 +420,20 @@ app.get('/', (req, res) => {
     }
 
     async function triggerDropCollect() {
-        await fetch('/api/
+        await fetch('/api/terminal/command', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ command: 'collect', pass: document.getElementById('master-pass').value })
+        });
+        routeTab('terminal'); syncDataFeed();
+    }
+
+    async function commitConfig() {
+        await fetch('/api/config/set', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                token: document.getElementById('tg-token').value,
+                chatId: document.getElementById('tg-chat').value,
+                mainId: document.getElementById('main-id').value,
+                pass: document.getElementById('master-pass').
