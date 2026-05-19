@@ -8,10 +8,10 @@
   },
   "dependencies": {
     "express": "^4.19.2",
-    "steam-user": "^5.2.0",
-    "steam-totp": "^2.1.2",
-    "steamcommunity": "^3.45.0",
-    "steam-tradeoffer-manager": "^4.6.0",
+    "steam-user": "latest",
+    "steam-totp": "latest",
+    "steamcommunity": "latest",
+    "steam-tradeoffer-manager": "latest",
     "sqlite3": "^5.1.7"
   },
   "engines": {
