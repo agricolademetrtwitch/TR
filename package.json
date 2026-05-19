@@ -1,7 +1,7 @@
 {
-  "name": "steam-autonomous-hyper-suite",
-  "version": "6.5.0",
-  "description": "Enterprise Monolithic Multi-Account Steam Farm, Trading & DLC Unlocker Core",
+  "name": "steam-autonomous-supreme-suite",
+  "version": "7.0.0",
+  "description": "Enterprise Monolithic Steam Farm and Trading Suite",
   "main": "server.js",
   "license": "MIT",
   "scripts": {
@@ -13,7 +13,7 @@
     "steam-totp": "latest",
     "steamcommunity": "latest",
     "steam-tradeoffer-manager": "latest",
-    "sqlite3": "^5.1.7"
+    "sqlite3": "5.1.6"
   },
   "engines": {
     "node": ">=18.0.0"
