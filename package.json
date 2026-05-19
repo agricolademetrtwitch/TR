@@ -1,9 +1,10 @@
 {
   "name": "steam-autonomous-supreme-suite",
-  "version": "7.6.0",
+  "version": "7.5.0",
   "description": "Enterprise Monolithic Steam Farm, Trading & Achievements Suite",
   "main": "server.js",
   "license": "MIT",
+  "private": true,
   "scripts": {
     "start": "node server.js"
   },
@@ -18,7 +19,8 @@
   "overrides": {
     "tar": "^6.2.3",
     "glob": "^10.3.10",
-    "rimraf": "^5.0.5"
+    "rimraf": "^5.0.5",
+    "uuid": "^9.0.1"
   },
   "engines": {
     "node": ">=18.0.0"
