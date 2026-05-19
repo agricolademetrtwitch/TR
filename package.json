@@ -1,17 +1,17 @@
 {
-  "name": "steam-autonomous-one-file-suite",
-  "version": "3.5.0",
-  "description": "Cloud-ready Steam suite inside one monolithic file",
+  "name": "steam-autonomous-godmode-suite",
+  "version": "4.0.0",
+  "description": "Enterprise-grade monolithic Steam multi-account farm and trading engine",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.19.2",
-    "steam-user": "latest",
-    "steam-totp": "latest",
-    "steamcommunity": "latest",
-    "steam-tradeoffer-manager": "latest",
+    "steam-user": "^5.2.0",
+    "steam-totp": "^2.1.2",
+    "steamcommunity": "^3.45.0",
+    "steam-tradeoffer-manager": "^4.6.0",
     "sqlite3": "^5.1.7"
   },
   "engines": {
