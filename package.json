@@ -3,33 +3,30 @@
   "version": "7.5.0",
   "description": "Enterprise Monolithic Steam Farm, Trading & Achievements Suite",
   "main": "server.js",
-  "license": "MIT",
   "private": true,
+  "type": "commonjs",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "clean": "rm -rf node_modules yarn.lock package-lock.json && yarn cache clean"
   },
-  {
-  "name": "TR",
-  "version": "1.0.0",
-  "private": true
-  "license": "UNLICENSED"
-},
   "dependencies": {
-    "express": "^4.19.2",
-    "steam-user": "latest",
-    "steam-totp": "latest",
-    "steamcommunity": "latest",
-    "steam-tradeoffer-manager": "latest",
-    "sqlite3": "5.1.7"
+    "express": "^4.21.2",
+    "sqlite3": "^5.1.7",
+    "steam-totp": "^2.1.2",
+    "steam-tradeoffer-manager": "^2.13.0",
+    "steam-user": "^5.3.0",
+    "steamcommunity": "^3.50.0"
   },
   
-  "overrides": {
+  "resolutions": {
     "tar": "^6.2.3",
     "glob": "^10.3.10",
     "rimraf": "^5.0.5",
-    "uuid": "^9.0.1"
+    "uuid": "^9.0.1",
+    "long": "^5.2.3"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   }
 }
