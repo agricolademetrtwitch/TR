@@ -8,6 +8,12 @@
   "scripts": {
     "start": "node server.js"
   },
+  {
+  "name": "TR",
+  "version": "1.0.0",
+  "private": true
+  "license": "UNLICENSED"
+},
   "dependencies": {
     "express": "^4.19.2",
     "steam-user": "latest",
@@ -16,6 +22,7 @@
     "steam-tradeoffer-manager": "latest",
     "sqlite3": "5.1.7"
   },
+  
   "overrides": {
     "tar": "^6.2.3",
     "glob": "^10.3.10",
