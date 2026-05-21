@@ -19,8 +19,8 @@
     "steam-user": "^5.3.0",
     "steamcommunity": "^3.50.0"
   },
-  "resolutions": {
-    "tar": "^6.2.3",
+ "resolutions": {
+    "tar": "^6.2.1",
     "glob": "^10.3.10",
     "rimraf": "^5.0.5",
     "uuid": "^9.0.1",
