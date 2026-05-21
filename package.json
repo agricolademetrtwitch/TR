@@ -10,7 +10,7 @@
     "dev": "node --watch server.js"
   },
   "dependencies": {
-    "@google/genai": "^0.1.1",
+    "@google/genai": "^1.52.0",
     "express": "^4.21.2",
     "express-session": "^1.18.0",
     "sqlite3": "^5.1.7",
@@ -19,7 +19,7 @@
     "steam-user": "^5.3.0",
     "steamcommunity": "^3.50.0"
   },
- "resolutions": {
+  "resolutions": {
     "tar": "^6.2.1",
     "glob": "^10.3.10",
     "rimraf": "^5.0.5",
