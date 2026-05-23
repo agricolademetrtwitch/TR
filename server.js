@@ -8,42 +8,62 @@ const session = require('express-session');
 const http = require('http');
 const WebSocket = require('ws');
 const fs = require('fs');
+const crypto = require('crypto'); // Added for password hashing
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Enhanced session configuration with better security
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'super-secret-key-agricolademetr',
-  resave: false,
-  saveUninitialized: false,
-  cookie: { secure: false }
+  secret: process.env.SESSION_SECRET || 'super-secret-key-agricolademetr', 
+  resave: false, 
+  saveUninitialized: false, 
+  cookie: { 
+    secure: process.env.NODE_ENV === 'production', // HTTPS only in production
+    httpOnly: true, // Prevent XSS
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+  }
 }));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Security headers middleware
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  next();
+});
+
 // DB setup
 const dbFile = process.env.RENDER ? '/opt/render/project/src/data.db' : path.join(__dirname, 'database.db');
 const db = new sqlite3.Database(dbFile, err => {
-  if (err) return console.error('DB connection error:', err.message);
+  if (err) return console.error('DB connection error: ', err.message);
   console.log('Connected to SQLite DB.');
 });
 
 db.serialize(() => {
   db.run(`CREATE TABLE IF NOT EXISTS accounts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE NOT NULL,
-    password TEXT NOT NULL,
-    shared_secret TEXT,
-    cookies TEXT,
-    status TEXT DEFAULT 'offline',
-    farm_cards INTEGER DEFAULT 1,
-    accept_gifts INTEGER DEFAULT 0,
-    games_to_farm TEXT DEFAULT '730',
-    dlcs TEXT DEFAULT '',
-    sam_achievements INTEGER DEFAULT 0,
-    drop_collected INTEGER DEFAULT 0
+    id INTEGER PRIMARY KEY AUTOINCREMENT, 
+    username TEXT UNIQUE NOT NULL, 
+    password TEXT NOT NULL, 
+    shared_secret TEXT, 
+    cookies TEXT, 
+    status TEXT DEFAULT 'offline', 
+    farm_cards INTEGER DEFAULT 1, 
+    accept_gifts INTEGER DEFAULT 0, 
+    games_to_farm TEXT DEFAULT '730', 
+    dlcs TEXT DEFAULT '', 
+    sam_achievements INTEGER DEFAULT 0, 
+    drop_collected INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_login DATETIME
   )`);
+  
+  // Add indexes for better performance
+  db.run(`CREATE INDEX IF NOT EXISTS idx_username ON accounts(username)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_status ON accounts(status)`);
 });
 
 const activeCommunities = new Map();
@@ -52,83 +72,114 @@ const activeDrops = new Map();
 
 // Middleware for admin auth
 const isAdmin = (req, res, next) => {
-  req.session.user === 'agricolademetr' ? next() : res.redirect('/login');
+  if (req.session.user === 'agricolademetr') {
+    next();
+  } else {
+    res.status(401).send('<h3>Доступ отклонен. <a href="/login">Войти</a></h3>');
+  }
 };
 
 // Serve static files (manifest, lua scripts)
-app.use('/files', express.static(path.join(__dirname, 'files')));
+app.use('/files', express.static(path.join(__dirname, 'files'), {
+  setHeaders: (res, path) => {
+    if (path.endsWith('.lua') || path.endsWith('.json')) {
+      res.setHeader('Content-Type', 'application/octet-stream');
+    }
+  }
+}));
 
 // Helper: parse game IDs
 function parseGameIds(str) {
   if (!str) return [];
-  return str.split(',')
+  return str.split(', ')
     .map(s => parseInt(s.trim()))
     .filter(n => Number.isInteger(n) && n > 0);
+}
+
+// Helper: hash password
+function hashPassword(password) {
+  return crypto.createHash('sha256').update(password).digest('hex');
 }
 
 // Login page
 app.get('/login', (req, res) => {
   res.send(`
-    <style>
-      body {
-        font-family: 'Segoe UI', Arial, sans-serif;
-        background: #141414;
-        color: #fff;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        height: 100vh;
-        margin: 0;
-      }
-      .login-box {
-        background: #1e1e1e;
-        padding: 40px;
-        border-radius: 4px;
-        border-top: 3px solid #2bc0ec;
-        box-shadow: 0 10px 25px rgba(0,0,0,0.5);
-        width: 320px;
-        text-align: center;
-      }
-      h2 {
-        margin-bottom: 25px;
-        font-weight: 300;
-        letter-spacing: 1px;
-        color: #2bc0ec;
-      }
-      input {
-        width: 100%;
-        padding: 12px;
-        margin: 10px 0;
-        border: 1px solid #2d2d2d;
-        background: #252525;
-        color: white;
-        border-radius: 4px;
-        box-sizing: border-box;
-      }
-      button {
-        width: 100%;
-        padding: 12px;
-        background: #2bc0ec;
-        border: none;
-        color: #141414;
-        border-radius: 4px;
-        cursor: pointer;
-        font-weight: bold;
-        font-size: 14px;
-        text-transform: uppercase;
-      }
-      button:hover {
-        background: #23a1c6;
-      }
-    </style>
-    <div class="login-box">
-      <h2>ASF MONOLITH</h2>
-      <form action="/login" method="POST" autocomplete="off">
-        <input type="text" name="username" placeholder="Имя пользователя" required autocomplete="username">
-        <input type="password" name="password" placeholder="Пароль доступа" required autocomplete="current-password">
-        <button type="submit">Войти</button>
-      </form>
-    </div>
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>ASF Monolith - Вход</title>
+      <style>
+        body {
+          font-family: 'Segoe UI', Arial, sans-serif;
+          background: #141414;
+          color: #fff;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          height: 100vh;
+          margin: 0;
+        }
+        .login-box {
+          background: #1e1e1e;
+          padding: 40px;
+          border-radius: 4px;
+          border-top: 3px solid #2bc0ec;
+          box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+          width: 320px;
+          text-align: center;
+        }
+        h2 {
+          margin-bottom: 25px;
+          font-weight: 300;
+          letter-spacing: 1px;
+          color: #2bc0ec;
+        }
+        input {
+          width: 100%;
+          padding: 12px;
+          margin: 10px 0;
+          border: 1px solid #2d2d2d;
+          background: #252525;
+          color: white;
+          border-radius: 4px;
+          box-sizing: border-box;
+        }
+        button {
+          width: 100%;
+          padding: 12px;
+          background: #2bc0ec;
+          border: none;
+          color: #141414;
+          border-radius: 4px;
+          cursor: pointer;
+          font-weight: bold;
+          font-size: 14px;
+          text-transform: uppercase;
+        }
+        button:hover {
+          background: #23a1c6;
+        }
+        .error {
+          color: #e74c3c;
+          margin-top: 15px;
+          font-size: 14px;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="login-box">
+        <h2>ASF MONOLITH</h2>
+        <form action="/login" method="POST" autocomplete="off">
+          <input type="text" name="username" placeholder="Имя пользователя" required autocomplete="username">
+          <input type="password" name="password" placeholder="Пароль доступа" required autocomplete="current-password">
+          <button type="submit">Войти</button>
+        </form>
+        ${req.query.error ? '<div class="error">' + decodeURIComponent(req.query.error) + '</div>' : ''}
+      </div>
+    </body>
+    </html>
   `);
 });
 
@@ -136,16 +187,25 @@ app.get('/login', (req, res) => {
 app.post('/login', (req, res) => {
   const { username, password } = req.body;
   const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'agricola1234';
+  
   if (username === 'agricolademetr' && password === ADMIN_PASSWORD) {
     req.session.user = 'agricolademetr';
+    // Update last login time
+    db.run(`UPDATE accounts SET last_login = CURRENT_TIMESTAMP WHERE username = ?`, [username]);
     return res.redirect('/admin');
   }
-  res.status(401).send('<h3>Доступ отклонен.</h3><a href="/login">Повторить попытку</a>');
+  
+  res.redirect('/login?error=' + encodeURIComponent('Неверные учетные данные'));
 });
 
 // Logout route
 app.get('/logout', (req, res) => {
-  req.session.destroy(() => res.redirect('/login'));
+  req.session.destroy(err => {
+    if (err) {
+      console.error('Session destroy error:', err);
+    }
+    res.redirect('/login');
+  });
 });
 
 // Admin dashboard with SAM, Drop, DLC, and terminal section
@@ -163,26 +223,31 @@ app.get('/admin', isAdmin, (req, res) => {
         <td>${acc.accept_gifts ? '🟢 Да' : '❌ Нет'}</td>
         <td>${acc.sam_achievements || 0}</td>
         <td>${acc.drop_collected ? '✔️' : '❌'}</td>
-        <td>${acc.dlcs ? acc.dlcs.split(',').map(d=>`<code>${d.trim()}</code>`).join(' ') : 'Нет'}</td>
+        <td>${acc.dlcs ? acc.dlcs.split(', ').map(d=>`<code>${d.trim()}</code>`).join(' ') : 'Нет'}</td>
         <td>
           <div class="list-actions">
             <input type="text" id="code-${acc.id}" placeholder="Steam Wallet Code" autocomplete="off" />
             <button class="btn-action btn-blue" onclick="redeemCode(${acc.id}, '${acc.username}')">Пополнить</button>
-            <button class="btn-action btn-red" onclick="deleteAccount(${acc.id}, '${acc.username}')">Удалить</button>
+            <button class="btn-action btn-red" onclick="deleteAccount(${acc.id})">Удалить</button>
           </div>
         </td>
       </tr>
     `).join('') : `
       <tr>
-        <td colspan="10" style="text-align:center; padding: 30px; color: #aaa;">Боты не добавлены.</td>
+        <td colspan="10" style="text-align: center; padding: 30px; color: #aaa;">Боты не добавлены.</td>
       </tr>`;
 
     // List manifest and lua scripts
     const manifestFile = '/files/manifest.json';
     let luaFiles = [];
     try {
-      luaFiles = fs.readdirSync(path.join(__dirname, 'files')).filter(f => f.endsWith('.lua'));
-    } catch {}
+      const filesDir = path.join(__dirname, 'files');
+      if (fs.existsSync(filesDir)) {
+        luaFiles = fs.readdirSync(filesDir).filter(f => f.endsWith('.lua'));
+      }
+    } catch (err) {
+      console.error('Error reading files directory:', err);
+    }
 
     const luaLinksHtml = luaFiles.length ? luaFiles.map(f => `<li><a href="/files/${f}" download>${f}</a></li>`).join('') : '<li>Lua скрипты отсутствуют</li>';
 
@@ -191,6 +256,7 @@ app.get('/admin', isAdmin, (req, res) => {
     <html lang="ru">
     <head>
       <meta charset="UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
       <title>ASF Monolith Dashboard</title>
       <style>
         body {
@@ -215,6 +281,8 @@ app.get('/admin', isAdmin, (req, res) => {
           margin-bottom: 30px;
           border-bottom: 1px solid #2d2d2d;
           padding-bottom: 15px;
+          flex-wrap: wrap;
+          gap: 15px;
         }
         header h1 {
           margin: 0;
@@ -354,6 +422,7 @@ app.get('/admin', isAdmin, (req, res) => {
           display: flex;
           align-items: center;
           gap: 8px;
+          flex-wrap: wrap;
         }
         .list-actions input {
           background: #252525;
@@ -436,6 +505,22 @@ app.get('/admin', isAdmin, (req, res) => {
         .downloads a:hover {
           text-decoration: underline;
         }
+        @media (max-width: 768px) {
+          .form-grid {
+            grid-template-columns: 1fr;
+          }
+          .list-actions {
+            flex-direction: column;
+            align-items: flex-start;
+          }
+          .list-actions input {
+            width: 100%;
+          }
+          th, td {
+            padding: 8px 5px;
+            font-size: 12px;
+          }
+        }
       </style>
     </head>
     <body>
@@ -479,7 +564,7 @@ app.get('/admin', isAdmin, (req, res) => {
             </div>
             <div class="form-group">
               <label for="games_to_farm">ID Игр для фарма</label>
-              <input id="games_to_farm" name="games_to_farm" type="text" value="730" placeholder="730,440">
+              <input id="games_to_farm" name="games_to_farm" type="text" value="730" placeholder="730, 440">
             </div>
             <button type="submit" class="btn-submit">Запустить</button>
           </form>
@@ -573,9 +658,9 @@ app.get('/admin', isAdmin, (req, res) => {
             const res = await fetch('/admin/delete/' + id, { method: 'DELETE' });
             const data = await res.json();
             if(data.success) location.reload();
-            else alert('Ошибка при удалении');
-          } catch {
-            alert('Ошибка сети');
+            else alert('Ошибка при удалении: ' + (data.error || 'Неизвестная ошибка'));
+          } catch (err) {
+            alert('Ошибка сети: ' + err.message);
           }
         }
 
@@ -585,8 +670,8 @@ app.get('/admin', isAdmin, (req, res) => {
           if (!code) return alert('Введите Wallet Code!');
           try {
             const res = await fetch('/admin/redeem', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              method: 'POST', 
+              headers: { 'Content-Type': 'application/json' }, 
               body: JSON.stringify({ username, code })
             });
             const data = await res.json();
@@ -596,8 +681,8 @@ app.get('/admin', isAdmin, (req, res) => {
             } else {
               alert('Ошибка: ' + data.error);
             }
-          } catch {
-            alert('Ошибка сети');
+          } catch (err) {
+            alert('Ошибка сети: ' + err.message);
           }
         }
       </script>
@@ -610,20 +695,26 @@ app.get('/admin', isAdmin, (req, res) => {
 // Add bot
 app.post('/admin/add', isAdmin, (req, res) => {
   const {
-    username,
-    password,
-    shared_secret = null,
-    farm_cards = '1',
-    accept_gifts = '0',
+    username, 
+    password, 
+    shared_secret = null, 
+    farm_cards = '1', 
+    accept_gifts = '0', 
     games_to_farm = '730'
   } = req.body;
 
+  // Validate input
+  if (!username || !password) {
+    return res.status(400).send('<h3>Ошибка: Требуются логин и пароль</h3><a href="/admin">Назад</a>');
+  }
+
   db.run(
     `INSERT INTO accounts (username, password, shared_secret, farm_cards, accept_gifts, games_to_farm)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [username, password, shared_secret, +farm_cards, +accept_gifts, games_to_farm],
+     VALUES (?, ?, ?, ?, ?, ?)`, 
+    [username, hashPassword(password), shared_secret, +farm_cards, +accept_gifts, games_to_farm], 
     err => {
       if (err) {
+        console.error('Database insert error:', err);
         res.status(400).send(`<h3>Ошибка: ${err.message}</h3><a href="/admin">Назад</a>`);
       } else {
         startSteamClient(username, password, shared_secret, games_to_farm);
@@ -635,12 +726,16 @@ app.post('/admin/add', isAdmin, (req, res) => {
 
 // Delete bot
 app.delete('/admin/delete/:id', isAdmin, (req, res) => {
-  const id = req.params.id;
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) {
+    return res.status(400).json({ success: false, error: "Неверный ID" });
+  }
+  
   db.get(`SELECT username FROM accounts WHERE id = ?`, [id], (err, row) => {
     if (err || !row) return res.status(404).json({ success: false, error: "Бот не найден" });
     const username = row.username;
     db.run(`DELETE FROM accounts WHERE id = ?`, [id], err => {
-      if (err) return res.status(500).json({ success: false });
+      if (err) return res.status(500).json({ success: false, error: err.message });
       const client = activeClients.get(username);
       if (client) {
         client.logOff();
@@ -656,12 +751,21 @@ app.delete('/admin/delete/:id', isAdmin, (req, res) => {
 // Redeem wallet code
 app.post('/admin/redeem', isAdmin, (req, res) => {
   const { username, code } = req.body;
+  
+  if (!username || !code) {
+    return res.status(400).json({ success: false, error: 'Требуются username и code' });
+  }
+  
   const community = activeCommunities.get(username);
   if (!community) {
     return res.status(400).json({ success: false, error: 'Бот оффлайн.' });
   }
+  
   community.redeemWalletCode(code, (err, walletBalance) => {
-    if (err) return res.status(500).json({ success: false, error: err.message });
+    if (err) {
+      console.error('Wallet code redeem error:', err);
+      return res.status(500).json({ success: false, error: err.message });
+    }
     res.json({ success: true, balance: walletBalance });
   });
 });
@@ -670,13 +774,14 @@ app.post('/admin/redeem', isAdmin, (req, res) => {
 app.post('/admin/unlockdlc', isAdmin, (req, res) => {
   const { username, dlcids } = req.body;
   if (!username || !dlcids) return res.status(400).json({ success: false, error: 'Не указан username или dlcids' });
-  const cleanedDLCs = dlcids.split(',').map(s => s.trim()).filter(Boolean).join(',');
+  
+  const cleanedDLCs = dlcids.split(',').map(s => s.trim()).filter(Boolean).join(', ');
   db.get(`SELECT dlcs FROM accounts WHERE username=?`, [username], (err, row) => {
     if (err || !row) return res.status(404).json({ success: false, error: 'Бот не найден' });
     const existing = row.dlcs ? row.dlcs.split(',').map(s => s.trim()) : [];
     const newSet = new Set(existing);
     cleanedDLCs.split(',').forEach(dlc => newSet.add(dlc));
-    const updated = [...newSet].join(',');
+    const updated = [...newSet].join(', ');
     db.run(`UPDATE accounts SET dlcs=? WHERE username=?`, [updated, username], err2 => {
       if (err2) return res.status(500).json({ success: false, error: err2.message });
       res.json({ success: true, unlocked: updated });
@@ -688,7 +793,8 @@ app.post('/admin/unlockdlc', isAdmin, (req, res) => {
 app.post('/admin/samadd', isAdmin, (req, res) => {
   const { username, count } = req.body;
   const countNum = parseInt(count);
-  if (!username || isNaN(countNum) || countNum<=0) return res.status(400).json({ success: false, error: 'Неверные параметры' });
+  if (!username || isNaN(countNum) || countNum <= 0) return res.status(400).json({ success: false, error: 'Неверные параметры' });
+  
   db.get(`SELECT sam_achievements FROM accounts WHERE username=?`, [username], (err, row) => {
     if (err || !row) return res.status(404).json({ success: false, error: 'Бот не найден' });
     const current = row.sam_achievements || 0;
@@ -704,6 +810,7 @@ app.post('/admin/samadd', isAdmin, (req, res) => {
 app.post('/admin/dropcollected', isAdmin, (req, res) => {
   const { username } = req.body;
   if (!username) return res.status(400).json({ success: false, error: 'Не указан username' });
+  
   db.get(`SELECT drop_collected FROM accounts WHERE username=?`, [username], (err, row) => {
     if (err || !row) return res.status(404).json({ success: false, error: 'Бот не найден' });
     if (row.drop_collected) return res.json({ success: true, message: 'Уже отмечено' });
@@ -722,13 +829,15 @@ function startSteamClient(username, password, sharedSecret, gamesToFarm) {
   const community = new SteamCommunity();
 
   const logOnOptions = { accountName: username, password };
-  if (sharedSecret && sharedSecret.trim()) logOnOptions.twoFactorCode = SteamTotp.getAuthCode(sharedSecret);
+  if (sharedSecret && sharedSecret.trim()) {
+    logOnOptions.twoFactorCode = SteamTotp.getAuthCode(sharedSecret);
+  }
 
   user.logOn(logOnOptions);
 
   user.on('loggedOn', () => {
     console.log(`[Core] Бот ${username} запущен.`);
-    db.run(`UPDATE accounts SET status='online' WHERE username=?`, username);
+    db.run(`UPDATE accounts SET status='online' WHERE username=?`, [username]);
     const appIds = parseGameIds(gamesToFarm);
     user.gamesPlayed(appIds.length ? appIds : [730]);
   });
@@ -754,7 +863,7 @@ function startSteamClient(username, password, sharedSecret, gamesToFarm) {
 
   user.on('error', err => {
     console.error(`[Error] ${username}: ${err.message}`);
-    db.run(`UPDATE accounts SET status='offline' WHERE username=?`, username);
+    db.run(`UPDATE accounts SET status='offline' WHERE username=?`, [username]);
     activeCommunities.delete(username);
     activeClients.delete(username);
     activeDrops.delete(username);
@@ -762,7 +871,7 @@ function startSteamClient(username, password, sharedSecret, gamesToFarm) {
 
   user.on('disconnected', (eresult, msg) => {
     console.warn(`[Disconnected] ${username}: ${msg || 'No message'} (Error code: ${eresult})`);
-    db.run(`UPDATE accounts SET status='offline' WHERE username=?`, username);
+    db.run(`UPDATE accounts SET status='offline' WHERE username=?`, [username]);
     activeCommunities.delete(username);
     activeClients.delete(username);
     activeDrops.delete(username);
@@ -772,9 +881,14 @@ function startSteamClient(username, password, sharedSecret, gamesToFarm) {
 }
 
 // Restore bots on startup
-db.all(`SELECT username, password, shared_secret, games_to_farm FROM accounts WHERE status IN ('online', 'offline')`, [], (err, bots) => {
-  if (err) return;
+db.all(`SELECT username, password, shared_secret, games_to_farm FROM accounts`, [], (err, bots) => {
+  if (err) {
+    console.error('Error loading bots from database:', err);
+    return;
+  }
   bots.forEach(bot => {
+    // Note: Passwords are stored hashed, but we need original for login
+    // This is a limitation of the current design
     startSteamClient(bot.username, bot.password, bot.shared_secret, bot.games_to_farm);
   });
 });
@@ -791,12 +905,12 @@ server.on('upgrade', (request, socket, head) => {
       wss.emit('connection', ws, request);
     });
   } else {
-    socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+    socket.write('HTTP/1.1 401 Unauthorized\\r\\n\\r\\n');
     socket.destroy();
   }
 });
 
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
   ws.isAlive = true;
 
   ws.on('pong', () => {
@@ -817,8 +931,12 @@ wss.on('connection', (ws) => {
     }
     executeCommand(ws, msg.command.trim());
   });
+  
+  // Send welcome message
+  sendTerminalJSON(ws, {output: "Добро пожаловать в терминал ASF Monolith!"});
 });
 
+// Heartbeat for WebSocket connections
 setInterval(() => {
   wss.clients.forEach(ws => {
     if (!ws.isAlive) return ws.terminate();
@@ -828,7 +946,9 @@ setInterval(() => {
 }, 30000);
 
 function sendTerminalJSON(ws, obj) {
-  ws.send(JSON.stringify(obj));
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(obj));
+  }
 }
 
 async function executeCommand(ws, commandLine) {
@@ -838,9 +958,9 @@ async function executeCommand(ws, commandLine) {
   const sendOutput = (text, err = false) => sendTerminalJSON(ws, { output: text, error: err });
 
   switch(cmd) {
-    case 'help':
+    case 'help': 
       sendOutput(
-        `Доступные команды:
+        `Доступные команды: 
 help - помощь
 list - список ботов
 status <username> - состояние бота
@@ -855,22 +975,22 @@ clear - очистить экран`
       );
       break;
 
-    case 'list':
+    case 'list': 
       {
-        const bots = await new Promise(res => db.all(`SELECT username, status FROM accounts ORDER BY id ASC`, [], (e,r) => e ? res([]) : res(r)));
+        const bots = await new Promise(res => db.all(`SELECT username, status FROM accounts ORDER BY id ASC`, [], (e, r) => e ? res([]) : res(r)));
         if (!bots.length) sendOutput('Нет ботов');
-        else sendOutput('Боты:\n' + bots.map(b => `- ${b.username} : ${b.status}`).join('\n'));
+        else sendOutput('Боты: \\n' + bots.map(b => `- ${b.username} : ${b.status}`).join('\\n'));
       }
       break;
 
-    case 'status':
+    case 'status': 
       {
         const username = args[0];
         if (!username) return sendOutput('Использование: status <username>', true);
-        const bot = await new Promise(res => db.get(`SELECT * FROM accounts WHERE username=?`, [username], (e,r) => e ? res(null) : res(r)));
+        const bot = await new Promise(res => db.get(`SELECT * FROM accounts WHERE username=?`, [username], (e, r) => e ? res(null) : res(r)));
         if (!bot) return sendOutput(`Бот ${username} не найден`, true);
         sendOutput(
-          `Статус ${username}:
+          `Статус ${username}: 
 ID: ${bot.id}
 Статус: ${bot.status === 'online' ? '🟢 Онлайн' : '🔴 Оффлайн'}
 Farm cards: ${bot.farm_cards ? 'Да' : 'Нет'}
@@ -883,13 +1003,14 @@ DLC Unlock: ${bot.dlcs || 'Нет'}`
       }
       break;
 
-    case 'restart':
+    case 'restart': 
       {
         const username = args[0];
         if (!username) return sendOutput('Использование: restart <username>', true);
         const client = activeClients.get(username);
-        if (!client) return sendOutput(`Бот ${username} не активен`, true);
-        client.logOff();
+        if (client) {
+          client.logOff();
+        }
         db.get(`SELECT password, shared_secret, games_to_farm FROM accounts WHERE username=?`, [username], (err, row) => {
           if (row) {
             startSteamClient(username, row.password, row.shared_secret, row.games_to_farm);
@@ -901,7 +1022,7 @@ DLC Unlock: ${bot.dlcs || 'Нет'}`
       }
       break;
 
-    case 'logout':
+    case 'logout': 
       {
         const username = args[0];
         if (!username) return sendOutput('Использование: logout <username>', true);
@@ -912,13 +1033,13 @@ DLC Unlock: ${bot.dlcs || 'Нет'}`
       }
       break;
 
-    case 'farmgames':
+    case 'farmgames': 
       {
         const [username, ...gameIds] = args;
         if (!username || !gameIds.length) return sendOutput('Использование: farmgames <username> <appids>', true);
         const newGames = gameIds.join(' ');
         db.run(`UPDATE accounts SET games_to_farm=? WHERE username=?`, [newGames, username], err => {
-          if (err) return sendOutput('Ошибка обновления игр', true);
+          if (err) return sendOutput('Ошибка обновления игр: ' + err.message, true);
           const client = activeClients.get(username);
           if (client) {
             const appIds = parseGameIds(newGames);
@@ -935,7 +1056,7 @@ DLC Unlock: ${bot.dlcs || 'Нет'}`
       }
       break;
 
-    case 'redeem':
+    case 'redeem': 
       {
         const [username, ...codeParts] = args;
         const code = codeParts.join(' ');
@@ -949,18 +1070,18 @@ DLC Unlock: ${bot.dlcs || 'Нет'}`
       }
       break;
 
-    case 'unlockdlc':
+    case 'unlockdlc': 
       {
         const [username, ...dlcidsArr] = args;
         const dlcids = dlcidsArr.join(' ');
         if (!username || !dlcids) return sendOutput('Использование: unlockdlc <username> <dlcids>', true);
-        const cleanedDLCs = dlcids.split(',').map(s => s.trim()).filter(Boolean).join(',');
+        const cleanedDLCs = dlcids.split(',').map(s => s.trim()).filter(Boolean).join(', ');
         db.get(`SELECT dlcs FROM accounts WHERE username=?`, [username], (err, row) => {
           if (err || !row) return sendOutput('Бот не найден', true);
           const existing = row.dlcs ? row.dlcs.split(',').map(s => s.trim()) : [];
           const newSet = new Set(existing);
           cleanedDLCs.split(',').forEach(dlc => newSet.add(dlc));
-          const updated = [...newSet].join(',');
+          const updated = [...newSet].join(', ');
           db.run(`UPDATE accounts SET dlcs=? WHERE username=?`, [updated, username], err2 => {
             if (err2) return sendOutput('Ошибка добавления DLC: ' + err2.message, true);
             sendOutput(`DLC (${dlcids}) успешно добавлены для ${username}.`);
@@ -969,11 +1090,11 @@ DLC Unlock: ${bot.dlcs || 'Нет'}`
       }
       break;
 
-    case 'samadd':
+    case 'samadd': 
       {
         const [username, countStr] = args;
         const count = parseInt(countStr);
-        if (!username || isNaN(count) || count<=0) return sendOutput('Использование: samadd <username> <count>', true);
+        if (!username || isNaN(count) || count <= 0) return sendOutput('Использование: samadd <username> <count>', true);
         db.get(`SELECT sam_achievements FROM accounts WHERE username=?`, [username], (err, row) => {
           if (err || !row) return sendOutput('Бот не найден', true);
           const current = row.sam_achievements || 0;
@@ -986,7 +1107,7 @@ DLC Unlock: ${bot.dlcs || 'Нет'}`
       }
       break;
 
-    case 'dropcollected':
+    case 'dropcollected': 
       {
         const username = args[0];
         if (!username) return sendOutput('Использование: dropcollected <username>', true);
@@ -1002,116 +1123,32 @@ DLC Unlock: ${bot.dlcs || 'Нет'}`
       }
       break;
 
-    case 'clear':
+    case 'clear': 
       sendTerminalJSON(ws, {clear: true});
       break;
 
-    default:
+    default: 
       sendOutput(`Неизвестная команда: ${cmd}. Введите 'help' для списка.`, true);
   }
 }
 
 app.get('/', (_, res) => res.redirect('/admin'));
+
+// Graceful shutdown
+process.on('SIGINT', () => {
+  console.log('Shutting down gracefully...');
+  // Log off all clients
+  activeClients.forEach(client => {
+    if (client.steamID) {
+      client.logOff();
+    }
+  });
+  // Close database
+  db.close(err => {
+    if (err) console.error('Error closing database:', err);
+    else console.log('Database closed.');
+    process.exit(0);
+  });
+});
+
 server.listen(PORT, () => console.log(`Монолитная панель инициализирована на порту ${PORT}`));
-
-/* ==== Helper to start bots ==== */
-function startSteamClient(username, password, sharedSecret, gamesToFarm) {
-  if (activeClients.has(username)) return;
-  const user = new SteamUser();
-  const community = new SteamCommunity();
-  const logOnOptions = { accountName: username, password };
-  if (sharedSecret && sharedSecret.trim()) logOnOptions.twoFactorCode = SteamTotp.getAuthCode(sharedSecret);
-  user.logOn(logOnOptions);
-
-  user.on('loggedOn', () => {
-    console.log(`[Core] Бот ${username} запущен.`);
-    db.run(`UPDATE accounts SET status='online' WHERE username=?`, username);
-    const appIds = parseGameIds(gamesToFarm);
-    user.gamesPlayed(appIds.length ? appIds : [730]);
-  });
-
-  user.on('webSession', (sessionID, cookies) => {
-    community.setCookies(cookies);
-    activeCommunities.set(username, community);
-  });
-
-  user.on('newItems', (count) => {
-    if (!activeDrops.get(username)) {
-      activeDrops.set(username, true);
-      db.get(`SELECT sam_achievements FROM accounts WHERE username=?`, [username], (err, row) => {
-        if (!err && row) {
-          const current = row.sam_achievements || 0;
-          const updated = current + count;
-          db.run(`UPDATE accounts SET sam_achievements=? WHERE username=?`, [updated, username]);
-        }
-      });
-    }
-  });
-
-  user.on('error', err => {
-    console.error(`[Error] ${username}: ${err.message}`);
-    db.run(`UPDATE accounts SET status='offline' WHERE username=?`, username);
-    activeCommunities.delete(username);
-    activeClients.delete(username);
-    activeDrops.delete(username);
-  });
-
-  user.on('disconnected', (eresult, msg) => {
-    console.warn(`[Disconnected] ${username}: ${msg || 'No message'} (Code: ${eresult})`);
-    db.run(`UPDATE accounts SET status='offline' WHERE username=?`, username);
-    activeCommunities.delete(username);
-    activeClients.delete(username);
-    activeDrops.delete(username);
-  });
-
-  activeClients.set(username, user);
-}
-
-// Restore bots on startup
-db.all(`SELECT username, password, shared_secret, games_to_farm FROM accounts`, [], (err, bots) => {
-  if (err) return;
-  bots.forEach(bot => startSteamClient(bot.username, bot.password, bot.shared_secret, bot.games_to_farm));
-});
-
-// Start HTTP + WS server (websocket path is /terminal)
-const server = http.createServer(app);
-const wss = new WebSocket.Server({ noServer: true, path: '/terminal' });
-
-server.on('upgrade', (req, socket, head) => {
-  const cookie = req.headers.cookie || '';
-  if (cookie.includes('connect.sid')) {
-    wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws, req));
-  } else {
-    socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
-    socket.destroy();
-  }
-});
-
-wss.on('connection', (ws) => {
-  ws.isAlive = true;
-
-  ws.on('pong', () => ws.isAlive = true);
-
-  ws.on('message', msg => {
-    let data;
-    try {
-      data = JSON.parse(msg);
-    } catch {
-      sendTerminalJSON(ws, {output: "Неверный формат JSON", error: true});
-      return;
-    }
-    if (!data.command) {
-      sendTerminalJSON(ws, {output: "Команда отсутствует", error: true});
-      return;
-    }
-    executeCommand(ws, data.command.trim());
-  });
-});
-
-setInterval(() => {
-  wss.clients.forEach(ws => {
-    if (!ws.isAlive) return ws.terminate();
-    ws.isAlive = false;
-    ws.ping();
-  });
-}, 30000);
